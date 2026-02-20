@@ -1,56 +1,35 @@
 import asyncio
 import random
+import uuid
 from datetime import datetime, timedelta
 
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from openai import OpenAI
 
-from personal_bot.config import (
-    ACCESS_CODE,
-    BOT_TOKEN,
-    DATA_FILE,
-    OPENROUTER_API_KEY,
-    OPENROUTER_MODEL,
-    build_token_error,
-)
-from personal_bot.scheduler import (
-    add_history_text,
-    build_post_prompt,
-    ensure_channel_defaults,
-    hash_exists,
-    is_due,
-    mark_sent,
-)
+from personal_bot.config import ACCESS_CODE, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
+from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
 from personal_bot.services import ask_llm, fetch_crypto_snapshot
-from personal_bot.states import (
-    AccessCodeState,
-    AssistantState,
-    ChannelSetupState,
-    CryptoState,
-    EsotericState,
-    NavigatorState,
-    PsychologyState,
-)
-from personal_bot.storage import default_group_permissions, get_user_record, load_users, save_users, set_user_record, user_has_premium
+from personal_bot.states import AccessCodeState, AiHelpState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState
+from personal_bot.storage import default_group_permissions, default_life_profile, default_project, get_user_record, load_users, save_users, set_user_record, user_has_premium
 from personal_bot.ui import (
     BTN_ACCESS,
+    BTN_ACCOUNT,
     BTN_ADD_CHANNEL,
     BTN_AI,
+    BTN_AI_HELP,
     BTN_AUTOPOST,
     BTN_BACK,
+    BTN_CREATE_PROJECT,
     BTN_CRYPTO,
     BTN_ESOTERIC,
     BTN_GROUP,
-    BTN_MODE_FIXED,
-    BTN_MODE_INTERVAL,
-    BTN_MODE_RANDOM,
     BTN_MY,
     BTN_NAVIGATOR,
-    BTN_PSYCHOLOGY,
+    BTN_PROJECTS,
     autopost_menu_keyboard,
     back_menu,
     main_menu,
@@ -61,21 +40,110 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.message.filter(F.chat.type == "private")
 openai_client = OpenAI(api_key=OPENROUTER_API_KEY, base_url="https://openrouter.ai/api/v1")
 
+NAV_BTN_ADVICE = "🧠 Спросить совет"
+NAV_BTN_GOALS = "🎯 Мои цели"
+NAV_BTN_PROFILE = "📊 Мой профиль"
+NAV_BTN_TODAY = "📅 План сегодня"
+NAV_BTN_REMIND = "⏰ Напоминания"
+NAV_BTN_UPDATE = "🔄 Обновить анализ"
+
+TOPIC_QUESTIONS = {
+    "identity": "Как ты себя описываешь в 3 словах? Примеры: 'спокойный стратег', 'энергичный практик'.",
+    "values": "Что важнее в решениях: свобода, деньги, влияние или стабильность?",
+    "career": "Какая работа даёт ощущение силы? Примеры: запуск проектов / переговоры / аналитика.",
+    "money": "Какую финансовую цель хочешь закрыть за 6 месяцев?",
+    "dreams": "Если ограничений нет — какой проект ты бы начал завтра?",
+    "fears": "Что тормозит твой рост сейчас? Примеры: страх ошибки / дисциплина / окружение.",
+    "skills": "Какие 2 навыка дают тебе лучший результат?",
+    "habits": "Какая привычка стабильно тянет тебя вниз?",
+    "lifestyle": "Какой режим лучше: спринты или марафон?",
+    "energy": "Когда пик энергии: утром, днём или вечером?",
+    "risk tolerance": "Насколько ты готов рисковать от 1 до 10 и почему?",
+}
+
+ESOTERIC_MENU = {
+    "🃏 Таро": "Введи: ситуация + вопрос + горизонт (дни/недели)",
+    "🔮 Оракулы": "Введи: запрос + что хочешь получить на выходе",
+    "ᚱ Руны": "Введи: контекст + цель на 30 дней",
+    "☯️ И-цзин": "Введи: ситуация / выбор А / выбор Б",
+    "☕ Интуитивные методы": "Введи: эмоция дня + главный вопрос",
+    "⭐ Западная астрология": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    "🪐 Джйотиш": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    "🐉 Китайская астрология": "Введи: ДД.ММ.ГГГГ Пол + вопрос",
+    "🌙 Лунная астрология": "Введи: дата + цель месяца + вопрос",
+    "🔢 Пифагор": "Введи: ДД.ММ.ГГГГ",
+    "🧾 Каббалистическая": "Введи: ФИО + ДД.ММ.ГГГГ",
+    "🧩 Матрица судьбы": "Введи: ДД.ММ.ГГГГ + ключевой вопрос",
+    "🧠 Human Design": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    "🧠 Соционика": "Введи: 3 типичных сценария общения",
+    "🧠 MBTI": "Введи: как принимаешь решения + что заряжает",
+    "🧠 Эннеаграмма": "Введи: мотивация + главный страх",
+    "🌀 Чакры": "Введи: самочувствие + эмоции + запрос",
+    "✨ Рейки": "Введи: энергия (1-10) + стресс + цель",
+    "🧿 Карма": "Введи: повторяющийся сценарий + желаемый сдвиг",
+    "✋ Хиромантия": "Введи: описание ладони + вопрос",
+    "🙂 Физиогномика": "Введи: черты лица + вопрос",
+    "🏡 Фэншуй": "Введи: тип пространства + проблема + цель",
+    "📆 Ба-цзы": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Пол",
+    "🥋 Цигун": "Введи: уровень подготовки + цель + ограничения",
+}
+
+
+def user_menu(user_id: int):
+    return main_menu(user_has_premium(DATA_FILE, user_id))
+
+
+def dashboard_kb() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=NAV_BTN_ADVICE), KeyboardButton(text=NAV_BTN_GOALS)],
+            [KeyboardButton(text=NAV_BTN_PROFILE), KeyboardButton(text=NAV_BTN_TODAY)],
+            [KeyboardButton(text=NAV_BTN_REMIND), KeyboardButton(text=NAV_BTN_UPDATE)],
+            [KeyboardButton(text=BTN_BACK)],
+        ],
+        resize_keyboard=True,
+    )
+
+
+def profile_ready(profile: dict) -> bool:
+    return bool(profile.get("ai_analysis")) and bool(profile.get("answers_json"))
+
+
+def parse_analysis(text: str) -> dict:
+    lines = [x.strip("-• ") for x in text.splitlines() if x.strip()]
+    return {
+        "archetype": lines[0] if lines else "Стратег-практик",
+        "goals": lines[1:4] if len(lines) >= 4 else ["Усилить фокус", "Дожать ключевую цель", "Стабилизировать ритм"],
+        "daily_plan": lines[4] if len(lines) > 4 else "1 ключевая задача + итог дня",
+        "weekly_plan": lines[5] if len(lines) > 5 else "3 шага на неделю",
+        "monthly_plan": lines[6] if len(lines) > 6 else "1 главный результат месяца",
+    }
+
+
+def next_onboarding_question(profile: dict, last_user: str = "") -> str:
+    if last_user.lower().strip() in {"не знаю", "сложно", "хз"}:
+        return "Окей, упростим: тебе ближе контент, продажи или продукт?"
+    if random.random() < 0.2:
+        return "Можно странный вопрос? Если деньги не проблема — чем займёшься в ближайший год?"
+    seen = profile.get("onboarding_topics", [])
+    available = [x for x in TOPIC_QUESTIONS if x not in seen] or list(TOPIC_QUESTIONS)
+    topic = random.choice(available)
+    seen.append(topic)
+    profile["onboarding_topics"] = seen
+    return TOPIC_QUESTIONS[topic]
+
 
 async def run_llm_with_status(message: types.Message, statuses: list[str], llm_call):
     status_message = await message.answer(random.choice(statuses))
     task = asyncio.create_task(asyncio.to_thread(llm_call))
-
     while not task.done():
         await asyncio.sleep(2.2)
         if task.done():
             break
-        next_text = random.choice(statuses)
         try:
-            await status_message.edit_text(next_text)
+            await status_message.edit_text(random.choice(statuses))
         except Exception:
             pass
-
     answer = await task
     try:
         await status_message.delete()
@@ -84,695 +152,262 @@ async def run_llm_with_status(message: types.Message, statuses: list[str], llm_c
     return answer
 
 
-def mode_alias_to_key(text: str) -> str | None:
-    normalized = (text or "").strip().lower()
-    mapping = {
-        "интервал": "interval",
-        "по интервалу": "interval",
-        "⏱ интервал": "interval",
-        "фикс": "fixed",
-        "фикс время": "fixed",
-        "фикс-время": "fixed",
-        "🕒 фикс-время": "fixed",
-        "рандом": "random",
-        "рандомные": "random",
-        "случайные": "random",
-        "🎲 рандом": "random",
-    }
-    return mapping.get(normalized)
-
-
-async def ask_mode_questions(message: types.Message, state: FSMContext, mode: str):
-    await state.update_data(selected_mode=mode)
-    if mode == "interval":
-        await state.set_state(ChannelSetupState.waiting_interval)
-        await message.answer("⏱ Введи интервал в часах (например 6):")
-    elif mode == "fixed":
-        await state.set_state(ChannelSetupState.waiting_fixed_times)
-        await message.answer("🕒 Введи список времени через запятую, например: 09:00, 14:30, 21:10")
-    else:
-        await state.set_state(ChannelSetupState.waiting_random_window)
-        await message.answer("🎲 Введи диапазон и количество: start,end,count (пример: 9,21,3)")
-
-
-def group_permissions_kb(perms: dict) -> InlineKeyboardMarkup:
-    def mark(val: bool) -> str:
-        return "✅" if val else "❌"
-
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=f"{mark(perms.get('write'))} Писать", callback_data="gp:write")],
-            [InlineKeyboardButton(text=f"{mark(perms.get('edit'))} Редактировать", callback_data="gp:edit")],
-            [InlineKeyboardButton(text=f"{mark(perms.get('delete'))} Удалять", callback_data="gp:delete")],
-            [InlineKeyboardButton(text=f"{mark(perms.get('ban'))} Банить", callback_data="gp:ban")],
-            [InlineKeyboardButton(text=f"{mark(perms.get('posts'))} Автопостинг", callback_data="gp:posts")],
-        ]
-    )
-
-
-def status_for_section(section: str) -> list[str]:
-    mapping = {
-        "assistant": [
-            "🤔 Думаю...",
-            "🧠 Собираю мысли...",
-            "📚 Поднимаю знания...",
-            "🛠️ Формирую полезный ответ...",
-            "✨ Упаковываю красиво...",
-            "✅ Почти готово...",
-        ],
-        "ask": [
-            "🔎 Ищу лучший вариант...",
-            "🧩 Склеиваю логику...",
-            "🧠 Проверяю факты...",
-            "✍️ Формулирую ответ...",
-            "✨ Полирую подачу...",
-            "✅ Ещё секунда...",
-        ],
-        "crypto": [
-            "📈 Ищу голову и плечи...",
-            "📊 Сверяю объёмы...",
-            "🧮 Считаю динамику...",
-            "🕵️ Проверяю рыночный фон...",
-            "⚖️ Оцениваю риски...",
-            "✨ Собираю вывод...",
-            "✅ Почти готово...",
-        ],
-        "psychology": [
-            "🧠 Настраиваюсь на диалог...",
-            "💬 Подбираю бережные формулировки...",
-            "📌 Ищу корень запроса...",
-            "🌿 Готовлю поддерживающий ответ...",
-            "🫶 Делаю рекомендации практичными...",
-            "✨ Полирую тон общения...",
-            "✅ Почти готово...",
-        ],
-        "esoteric": [
-            "🔮 Настраиваю интуитивный канал...",
-            "🪬 Считываю символические связи...",
-            "📜 Анализирую выбранную систему...",
-            "🧭 Ищу практичные ориентиры...",
-            "✨ Собираю красивый разбор...",
-            "🌙 Проверяю энергетический фон...",
-            "✅ Почти готово...",
-        ],
-        "navigator": [
-            "🧭 Сканирую вектор развития...",
-            "🧠 Анализирую твой стиль мышления...",
-            "🎯 Уточняю глубинные цели...",
-            "🔍 Ищу ключевые блоки и страхи...",
-            "🛠️ Собираю персональную карту...",
-            "✨ Формирую конкретные шаги...",
-            "✅ Почти готово...",
-        ],
-    }
-    return mapping[section]
-
-
-PSYCHOLOGY_PROMPT = """
-Ты опытный, универсальный и этичный психолог-консультант.
-Твоя задача: поддержать человека, помочь структурировать мысли и предложить практичные шаги.
-
-Правила:
-- Пиши тепло, бережно и без осуждения.
-- Не ставь диагнозы и не назначай лечение.
-- Объясняй простым языком.
-- Давай конкретные техники самопомощи (1-3 упражнения), если уместно.
-- Если есть признаки острого кризиса/самоповреждения — мягко советуй обратиться за срочной профессиональной помощью.
-
-Формат:
-- Короткое эмпатичное вступление.
-- Анализ ситуации по пунктам.
-- Практический план на ближайшие 24-72 часа.
-"""
-
-
-ESOTERIC_SYSTEMS = {
-    "1": ("Таро", "Ты эксперт по Таро. Дай символический, психологичный и практичный разбор запроса через архетипы карт."),
-    "2": ("Оракулы", "Ты эксперт по оракулам. Дай мягкий интуитивный разбор и практический совет."),
-    "3": ("Руны", "Ты эксперт по рунам. Интерпретируй символы рун и дай прикладной вывод."),
-    "4": ("И-цзин", "Ты эксперт по И-цзин. Дай структурный разбор через логику перемен и действий."),
-    "5": ("Кофейная гуща / восковые отливки / маятник", "Ты эксперт по интуитивным методам гадания. Дай аккуратную трактовку и рекомендации."),
-    "6": ("Западная астрология", "Ты эксперт по западной астрологии: натальная карта, транзиты, совместимость."),
-    "7": ("Ведическая астрология (Джйотиш)", "Ты эксперт по Джйотиш. Дай разбор кармических акцентов и практических шагов."),
-    "8": ("Китайская астрология", "Ты эксперт по китайской астрологии: животные года, элементы, циклы."),
-    "9": ("Лунная астрология", "Ты эксперт по лунным циклам и их влиянию на решения и состояния."),
-    "10": ("Классическая нумерология (Пифагор)", "Ты эксперт по пифагорейской нумерологии: число судьбы и личные циклы."),
-    "11": ("Каббалистическая нумерология", "Ты эксперт по каббалистической нумерологии: буквы, числа, смыслы."),
-    "12": ("Матрица судьбы (22 аркана)", "Ты эксперт по матрице судьбы 22 аркана. Дай разбор сильных и слабых сторон."),
-    "13": ("Human Design", "Ты эксперт по Human Design. Объясни тип, стратегию, авторитет простым языком."),
-    "14": ("Соционика", "Ты эксперт по соционике. Дай типологический разбор и рекомендации по коммуникации."),
-    "15": ("MBTI", "Ты эксперт по MBTI. Дай структурный разбор типа и практичные советы."),
-    "16": ("Эннеаграмма", "Ты эксперт по эннеаграмме. Опиши мотивации, триггеры и зоны роста."),
-    "17": ("Чакровая система", "Ты эксперт по чакровой системе. Дай диагностику баланса и практики гармонизации."),
-    "18": ("Рейки", "Ты эксперт по Рейки. Дай мягкие рекомендации по энергетическому восстановлению."),
-    "19": ("Кармическая диагностика", "Ты эксперт по кармической диагностике. Дай бережный разбор уроков и векторов."),
-    "20": ("Хиромантия", "Ты эксперт по хиромантии. Дай символический разбор линий и практичные выводы."),
-    "21": ("Физиогномика", "Ты эксперт по физиогномике. Дай аккуратный и этичный разбор характера по чертам."),
-    "22": ("Фэншуй", "Ты эксперт по фэншуй. Предложи практичные шаги по гармонизации пространства."),
-    "23": ("Ба-цзы", "Ты эксперт по Ба-цзы. Дай разбор судьбы по дате и элементам."),
-    "24": ("Цигун", "Ты эксперт по Цигун. Подбери безопасные энергетические практики для старта."),
-}
-
-
-def esoteric_catalog_text() -> str:
-    groups = [
-        "🪄 Гадательные и эзотерические системы\n"
-        "1) Таро\n2) Оракулы\n3) Руны\n4) И-цзин\n5) Кофейная гуща / восковые отливки / маятник",
-        "⭐ Астрологические системы\n"
-        "6) Западная астрология\n7) Ведическая астрология (Джйотиш)\n8) Китайская астрология\n9) Лунная астрология",
-        "🔢 Нумерологические направления\n"
-        "10) Классическая нумерология\n11) Каббалистическая нумерология\n12) Матрица судьбы (22 аркана)",
-        "🧠 Психо-типологии\n"
-        "13) Human Design\n14) Соционика\n15) MBTI\n16) Эннеаграмма",
-        "🧿 Энергетические и духовные системы\n"
-        "17) Чакровая система\n18) Рейки\n19) Кармическая диагностика\n20) Хиромантия\n21) Физиогномика",
-        "🌏 Восточные практики\n22) Фэншуй\n23) Ба-цзы\n24) Цигун",
-    ]
-    return "\n\n".join(groups)
-
-
-NAVIGATOR_PROMPT = """
-ROLE:
-Ты AI Life Navigator.
-Ты живой собеседник, интервьюер, лайф-коуч и аналитик личности.
-
-ЦЕЛЬ:
-- Понять ценности, сильные стороны, страхи, мотивацию, мышление, цели.
-- Вести уникальный диалог (не повторяй одинаковые вопросы).
-- Минимум 7 и максимум 15 вопросов.
-
-ПОВЕДЕНИЕ:
-- Анализируй answers_json + insights + ai_analysis + последний ответ.
-- На каждом шаге сам решай: уточнить, сменить тему, упростить вопрос или завершить сбор.
-- Если ответ короткий/"не знаю"/"сложно" — упрости вопрос и дай 2-3 коротких примера ответов (до 5 слов каждый).
-- Если ответ эмоциональный или про мечту/страх — копай глубже follow-up вопросом.
-- Каждые 3 вопроса давай короткую поддержку: "Ты хорошо раскрываешься 👍" или "Спасибо за честность."
-
-STOP CONDITION:
-Когда данных достаточно, не задавай новый вопрос.
-Напиши фразу: "Спасибо. Я понял тебя. Сейчас соберу твою карту развития."
-
-АНАЛИЗ ПОСЛЕ STOP:
-1) Архетип личности (1)
-2) Сильные стороны (5)
-3) Ограничения (3)
-4) Основные ценности
-5) Подходящие направления
-6) План на 3 месяца
-7) daily_action (1 действие)
-8) weekly_focus (3 рекомендации)
-9) monthly_focus (1 приоритет)
-
-СТИЛЬ:
-- Коротко, конкретно, без воды.
-- Дружелюбно и умно, без заумных слов.
-- Без эзотерики и философских монологов.
-"""
-
+def status_for(section: str):
+    return {
+        "assistant": ["🤔 Думаю...", "🧠 Сверяю контекст...", "✅ Почти готово..."],
+        "navigator": ["🧭 Ищу вектор...", "🎯 Собираю план...", "✅ Уже готово..."],
+        "crypto": ["📈 Смотрю рынок...", "🧮 Считаю...", "✅ Финализирую..."],
+    }[section]
 
 
 async def ensure_premium(message: types.Message) -> bool:
     if user_has_premium(DATA_FILE, message.from_user.id):
         return True
-    await message.answer("🔐 Эта функция доступна только по коду. Нажми «🔐 Доступ по коду»", reply_markup=main_menu())
+    await message.answer("🔐 Функция доступна после кода. Нажми «🔐 Премиум услуги».", reply_markup=user_menu(message.from_user.id))
     return False
 
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    await message.answer(
-        "🚀 Добро пожаловать в личный AI-бот!\n\n"
-        "Выбери раздел в меню ниже 👇\n"
-        "• 🤖 AI ассистент (для всех)\n"
-        "• 🔐 Премиум функции по коду\n"
-        "• 📣 Автопостинг с гибким расписанием\n"
-        "• 📈 Крипто, 🧠 Психология и 🪄 Эзотерика",
-        reply_markup=main_menu(),
-    )
+    await message.answer("🚀 GorillaAI. Выбери раздел.", reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(Command("menu"))
 async def cmd_menu(message: types.Message):
-    await message.answer("🏠 Главное меню", reply_markup=main_menu())
+    await message.answer("🏠 Главное меню", reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(F.text == BTN_BACK)
 async def back_to_menu(message: types.Message, state: FSMContext):
     await state.clear()
-    await message.answer("⬅️ Возврат в главное меню", reply_markup=main_menu())
+    await message.answer("⬅️ Возврат в меню", reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(F.text == BTN_ACCESS)
 @dp.message(Command("access"))
 async def cmd_access(message: types.Message, state: FSMContext):
     await state.set_state(AccessCodeState.waiting_code)
-    await message.answer("🔑 Введи код доступа для приватных функций:", reply_markup=back_menu())
+    await message.answer("🔑 Введи код доступа", reply_markup=back_menu())
 
 
 @dp.message(AccessCodeState.waiting_code)
 async def process_access_code(message: types.Message, state: FSMContext):
-    if message.text.strip() == ACCESS_CODE:
+    if (message.text or "").strip() == ACCESS_CODE:
         record = get_user_record(DATA_FILE, message.from_user.id)
         record["premium"] = True
         set_user_record(DATA_FILE, message.from_user.id, record)
-        await message.answer("✅ Доступ открыт! Премиум-функции активированы 🎉", reply_markup=main_menu())
+        await state.clear()
+        await message.answer("✅ Премиум открыт", reply_markup=user_menu(message.from_user.id))
     else:
-        await message.answer("❌ Неверный код. Попробуй ещё раз или нажми «⬅️ Назад».", reply_markup=back_menu())
-        return
-    await state.clear()
+        await message.answer("❌ Неверный код")
 
 
 @dp.message(F.text == BTN_AI)
-async def assistant_menu(message: types.Message, state: FSMContext):
-    await state.set_state(AssistantState.waiting_question)
-    await message.answer(
-        "🤖 *AI Ассистент*\n\n"
-        "Что умеет:\n"
-        "• отвечает на любые вопросы\n"
-        "• объясняет сложные темы простым языком\n"
-        "• помогает с идеями, текстами, планами\n\n"
-        "✍️ Просто напиши свой вопрос следующим сообщением.",
-        parse_mode="Markdown",
-        reply_markup=back_menu(),
+@dp.message(Command("ask"))
+async def ask_ai(message: types.Message, state: FSMContext):
+    text = (message.text or "").replace("/ask", "", 1).strip()
+    if not text:
+        await state.set_state(AssistantState.waiting_question)
+        await message.answer("Напиши вопрос", reply_markup=back_menu())
+        return
+    answer = await run_llm_with_status(
+        message,
+        status_for("assistant"),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты полезный AI ассистент Telegram", text, max_tokens=700),
     )
+    await message.answer(f"🤖 {answer}", reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(AssistantState.waiting_question)
-async def assistant_question(message: types.Message):
-    q = (message.text or "").strip()
-    if not q:
-        await message.answer("⚠️ Напиши текстовый вопрос.")
-        return
-    answer = await run_llm_with_status(
-        message,
-        status_for_section("assistant"),
-        lambda: ask_llm(
-            openai_client,
-            OPENROUTER_MODEL,
-            OPENROUTER_API_KEY,
-            "Ты полезный универсальный AI ассистент Telegram. Отвечай ясно, структурно и по делу.",
-            q,
-            max_tokens=700,
-        ),
-    )
-    await message.answer(f"🤖 {answer}")
-
-
-@dp.message(Command("ask"))
-async def cmd_ask(message: types.Message):
-    question = (message.text or "").replace("/ask", "", 1).strip()
-    if not question:
-        await message.answer("⚠️ Использование: /ask <вопрос>")
-        return
-    answer = await run_llm_with_status(
-        message,
-        status_for_section("ask"),
-        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты полезный универсальный AI ассистент Telegram.", question),
-    )
-    await message.answer(f"🤖 {answer}")
-
-
-@dp.message(F.text == BTN_AUTOPOST)
-async def autopost_menu(message: types.Message):
-    if not await ensure_premium(message):
-        return
-
-    await message.answer(
-        "📣 *Автопостинг*\n\n"
-        "Здесь ты можешь настроить публикации в свой канал:\n"
-        "✅ Режим по интервалу (каждые N часов)\n"
-        "✅ Режим по фиксированному времени (например 09:00, 18:30)\n"
-        "✅ Режим рандомных постов в заданном диапазоне\n"
-        "✅ Посты генерируются ИИ и не повторяются\n"
-        "✅ Можно задать пример поста — бот будет держать похожий стиль",
-        parse_mode="Markdown",
-        reply_markup=main_menu(),
-    )
-    await message.answer(
-        "👇 Выбери действие кнопкой: добавить канал или сразу режим настройки.",
-        reply_markup=autopost_menu_keyboard(),
-    )
-
-
-
-
-@dp.message(F.text == BTN_ADD_CHANNEL)
-async def add_channel_button(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
-    await start_add_channel_flow(message, state)
-
-
-@dp.message(F.text.in_([BTN_MODE_INTERVAL, BTN_MODE_FIXED, BTN_MODE_RANDOM]))
-async def add_channel_mode_shortcut(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
-
-    selected_mode = {
-        BTN_MODE_INTERVAL: "interval",
-        BTN_MODE_FIXED: "fixed",
-        BTN_MODE_RANDOM: "random",
-    }[message.text]
-    await start_add_channel_flow(message, state)
-    await state.update_data(forced_mode=selected_mode)
-    await message.answer("⚙️ Режим выбран заранее. Продолжим настройку канала 👇")
-
-
-@dp.message(F.text.regexp(r"(?i)^(интервал|по интервалу|рандом|рандомные|фикс|фикс время|фикс-время)$"))
-async def add_channel_mode_text_alias(message: types.Message, state: FSMContext):
-    mode = mode_alias_to_key(message.text)
-    if not mode:
-        return
-    if not await ensure_premium(message):
-        return
-    await start_add_channel_flow(message, state)
-    await state.update_data(forced_mode=mode)
-    await message.answer("🧭 Принял режим из текста. Дальше заполним канал.")
-
-@dp.message(Command("add_channel"))
-async def add_channel_command(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
-    await start_add_channel_flow(message, state)
-
-
-async def start_add_channel_flow(message: types.Message, state: FSMContext):
-    await state.set_state(ChannelSetupState.waiting_name)
-    await message.answer("➕ Введи название канала (произвольное):", reply_markup=back_menu())
-
-
-@dp.message(ChannelSetupState.waiting_name)
-async def process_channel_name(message: types.Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await state.set_state(ChannelSetupState.waiting_chat_id)
-    await message.answer("🆔 Теперь отправь chat_id канала (пример: -1001234567890):")
-
-
-@dp.message(ChannelSetupState.waiting_chat_id)
-async def process_channel_chat_id(message: types.Message, state: FSMContext):
-    text = (message.text or "").strip()
-    if not text.startswith("-100"):
-        await message.answer("⚠️ Это не похоже на chat_id канала. Формат: -100...")
-        return
-    await state.update_data(chat_id=text)
-    await state.set_state(ChannelSetupState.waiting_topic)
-    await message.answer("🧠 Тема канала для постинга (например: крипта, бизнес, новости):")
-
-
-@dp.message(ChannelSetupState.waiting_topic)
-async def process_channel_topic(message: types.Message, state: FSMContext):
-    await state.update_data(topic=message.text.strip())
-    await state.set_state(ChannelSetupState.waiting_sample)
-    await message.answer(
-        "🧩 Пришли пример поста (образец стиля), и будущие посты будут похожи по оформлению и подаче.\n"
-        "Если без примера — отправь: -"
-    )
-
-
-@dp.message(ChannelSetupState.waiting_sample)
-async def process_channel_sample(message: types.Message, state: FSMContext):
-    sample_text = (message.text or "").strip()
-    if sample_text == "-":
-        sample_text = ""
-    await state.update_data(sample_post=sample_text)
-
-    data = await state.get_data()
-    forced_mode = data.get("forced_mode")
-    if forced_mode:
-        await ask_mode_questions(message, state, forced_mode)
-        return
-
-    await state.set_state(ChannelSetupState.waiting_mode)
-    kb = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="⏱ Интервал", callback_data="pick_mode_interval")],
-            [InlineKeyboardButton(text="🕒 Фикс время", callback_data="pick_mode_fixed")],
-            [InlineKeyboardButton(text="🎲 Рандом", callback_data="pick_mode_random")],
-        ]
-    )
-    await message.answer("⚙️ Выбери режим автопостинга:", reply_markup=kb)
-
-
-@dp.callback_query(F.data.startswith("pick_mode_"))
-async def pick_mode(callback: types.CallbackQuery, state: FSMContext):
-    mode = callback.data.replace("pick_mode_", "")
-
-    await ask_mode_questions(callback.message, state, mode)
-    await callback.answer()
-
-
-@dp.message(ChannelSetupState.waiting_interval)
-async def process_interval(message: types.Message, state: FSMContext):
-    try:
-        interval = int((message.text or "").strip())
-        if interval < 1:
-            raise ValueError
-    except ValueError:
-        await message.answer("⚠️ Интервал должен быть целым числом >= 1")
-        return
-
-    await save_channel_from_state(message, state, mode="interval", interval_hours=interval)
-
-
-@dp.message(ChannelSetupState.waiting_fixed_times)
-async def process_fixed_times(message: types.Message, state: FSMContext):
-    times = [x.strip() for x in (message.text or "").split(",") if x.strip()]
-    valid = []
-    for t in times:
-        try:
-            datetime.strptime(t, "%H:%M")
-            valid.append(t)
-        except ValueError:
-            pass
-    if not valid:
-        await message.answer("⚠️ Нужен формат HH:MM, например: 08:30, 19:45")
-        return
-
-    await save_channel_from_state(message, state, mode="fixed", fixed_times=sorted(set(valid)))
-
-
-@dp.message(ChannelSetupState.waiting_random_window)
-async def process_random_window(message: types.Message, state: FSMContext):
-    try:
-        start, end, count = [int(x.strip()) for x in (message.text or "").split(",")]
-        if start < 0 or start > 23 or end < 1 or end > 24 or end <= start or count < 1:
-            raise ValueError
-    except ValueError:
-        await message.answer("⚠️ Формат: start,end,count. Пример: 9,21,3")
-        return
-
-    await save_channel_from_state(
-        message,
-        state,
-        mode="random",
-        random_window={"start": start, "end": end, "posts_per_day": min(count, 12)},
-    )
-
-
-async def save_channel_from_state(message: types.Message, state: FSMContext, **kwargs):
-    data = await state.get_data()
-    record = get_user_record(DATA_FILE, message.from_user.id)
-
-    channel = {
-        "name": data["name"],
-        "chat_id": int(data["chat_id"]),
-        "topic": data["topic"],
-        "enabled": True,
-        "mode": kwargs.get("mode", "interval"),
-        "interval_hours": kwargs.get("interval_hours", 6),
-        "fixed_times": kwargs.get("fixed_times", ["12:00"]),
-        "random_window": kwargs.get("random_window", {"start": 9, "end": 21, "posts_per_day": 2}),
-        "next_run": (datetime.now() + timedelta(minutes=2)).isoformat(),
-        "last_plan_date": "",
-        "pending_today": [],
-        "history": [],
-        "sample_post": data.get("sample_post", ""),
-    }
-    record["channels"].append(channel)
-    set_user_record(DATA_FILE, message.from_user.id, record)
+async def ask_ai_state(message: types.Message, state: FSMContext):
     await state.clear()
+    await ask_ai(message, state)
 
-    await message.answer(f"✅ Канал добавлен! 📌 {channel['name']} | 🧠 {channel['topic']}", reply_markup=main_menu())
 
-
-@dp.message(F.text == BTN_MY)
-@dp.message(Command("my_channels"))
-async def my_channels(message: types.Message):
+@dp.message(F.text == BTN_AI_HELP)
+async def ai_help_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
-
-    record = get_user_record(DATA_FILE, message.from_user.id)
-    channels = record.get("channels", [])
-    if not channels:
-        await message.answer("🗂 Каналов пока нет. Добавь через /add_channel", reply_markup=main_menu())
-        return
-
-    lines = ["🗂 *Твои каналы:*\n"]
-    for idx, ch in enumerate(channels, start=1):
-        ensure_channel_defaults(ch)
-        if ch["mode"] == "interval":
-            mode_label = f"⏱ {ch['interval_hours']}ч"
-        elif ch["mode"] == "fixed":
-            mode_label = f"🕒 {', '.join(ch.get('fixed_times', []))}"
-        else:
-            rw = ch.get("random_window", {})
-            mode_label = f"🎲 {rw.get('start', 9)}-{rw.get('end', 21)}, {rw.get('posts_per_day', 2)}/день"
-
-        lines.append(
-            f"{idx}. 📣 {ch['name']}\n   🆔 {ch['chat_id']}\n   🧠 {ch['topic']}\n   ⚙️ {mode_label}\n"
-            f"   🧩 Пример: {'есть' if (ch.get('sample_post') or '').strip() else 'нет'}\n"
-            f"   {'✅ Включен' if ch.get('enabled') else '⛔ Выключен'}"
-        )
-    set_user_record(DATA_FILE, message.from_user.id, record)
-    await message.answer("\n\n".join(lines), parse_mode="Markdown", reply_markup=main_menu())
-
-
-@dp.message(F.text == BTN_GROUP)
-async def group_permissions_menu(message: types.Message):
-    if not await ensure_premium(message):
-        return
-
-    record = get_user_record(DATA_FILE, message.from_user.id)
-    perms = record.get("group_permissions") or default_group_permissions()
-    record["group_permissions"] = perms
-    set_user_record(DATA_FILE, message.from_user.id, record)
-
-    await message.answer(
-        "🛡 Настройки поведения бота в группах\n\n"
-        "Сейчас бот в группах не отвечает на чужие сообщения и не вмешивается в диалоги.\n"
-        "Здесь ты можешь заранее включать/выключать допустимые действия.",
-        reply_markup=main_menu(),
-    )
-    await message.answer("Выбери права для групп 👇", reply_markup=group_permissions_kb(perms))
-
-
-@dp.callback_query(F.data.startswith("gp:"))
-async def toggle_group_permission(callback: types.CallbackQuery):
-    key = callback.data.split(":", 1)[1]
-    if key not in {"write", "edit", "delete", "ban", "posts"}:
-        await callback.answer("Неизвестная настройка", show_alert=True)
-        return
-
-    record = get_user_record(DATA_FILE, callback.from_user.id)
-    perms = record.get("group_permissions") or default_group_permissions()
-    perms[key] = not perms.get(key, False)
-    record["group_permissions"] = perms
-    set_user_record(DATA_FILE, callback.from_user.id, record)
-
-    await callback.message.edit_text("🛡 Права в группах обновлены. Выбери дальше:", reply_markup=group_permissions_kb(perms))
-    await callback.answer("Готово")
-
-
-
-@dp.message(F.text == BTN_CRYPTO)
-async def crypto_menu(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
-    await state.set_state(CryptoState.waiting_coin)
-    await message.answer("📈 Введи coin id (bitcoin, ethereum, solana)", reply_markup=back_menu())
-
-
-@dp.message(CryptoState.waiting_coin)
-async def crypto_run(message: types.Message):
-    coin = (message.text or "").strip().lower()
-    if not coin:
-        await message.answer("⚠️ Введи coin id, например: bitcoin")
-        return
-
-    try:
-        snap = fetch_crypto_snapshot(coin)
-        if not snap:
-            await message.answer("❌ Монета не найдена. Попробуй: bitcoin / ethereum / solana")
-            return
-
-        prompt = (
-            f"Монета: {coin}\nЦена USD: {snap.get('usd')}\n24h %: {snap.get('usd_24h_change')}\n"
-            f"Market Cap: {snap.get('usd_market_cap')}\n24h Volume: {snap.get('usd_24h_vol')}\n"
-            "Сделай понятный анализ: тренд, риски, нейтральный вывод."
-        )
-        answer = await run_llm_with_status(
-            message,
-            status_for_section("crypto"),
-            lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты аккуратный крипто-аналитик.", prompt, max_tokens=450),
-        )
-        await message.answer(f"📊 Анализ по {coin}\n\n{answer}")
-    except Exception as e:
-        await message.answer(f"⚠️ Ошибка анализа: {e}")
-
-
-
-
-@dp.message(F.text == BTN_PSYCHOLOGY)
-async def psychology_menu(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
-    await state.set_state(PsychologyState.waiting_mode)
-
-    record = get_user_record(DATA_FILE, message.from_user.id)
-    contact = (record.get("psychologist_contact") or "не указан").strip() or "не указан"
-
+    await state.set_state(AiHelpState.waiting_mode)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🧠 ИИ-психолог", callback_data="psy:ai")],
-            [InlineKeyboardButton(text="📞 Психолог онлайн (контакты)", callback_data="psy:contact")],
+            [InlineKeyboardButton(text="🧠 Помощь ИИ агент", callback_data="help:ai")],
+            [InlineKeyboardButton(text="📞 Психолог онлайн", callback_data="help:online")],
         ]
     )
-    await message.answer(
-        "🧠 Раздел Психология\n\n"
-        "Выбери формат:\n"
-        "• ИИ-психолог — поддержка и разбор ситуации\n"
-        "• Психолог онлайн — контакт реального специалиста\n\n"
-        f"Текущий контакт: {contact}",
-        reply_markup=kb,
-    )
+    await message.answer("Выбери формат помощи", reply_markup=kb)
 
 
-@dp.callback_query(F.data.startswith("psy:"))
-async def psychology_choice(callback: types.CallbackQuery, state: FSMContext):
+@dp.callback_query(F.data.startswith("help:"))
+async def ai_help_mode(callback: types.CallbackQuery, state: FSMContext):
     mode = callback.data.split(":", 1)[1]
-    if mode == "ai":
-        await state.set_state(PsychologyState.waiting_question)
-        await callback.message.answer("🫶 Напиши, что тебя беспокоит. Я отвечу как бережный ИИ-психолог.")
+    if mode == "online":
+        await state.clear()
+        await callback.message.answer("Психолог онлайн: @aggressive_chik")
     else:
-        await state.set_state(PsychologyState.waiting_contact)
-        await callback.message.answer("📞 Пришли контакт реального психолога (телефон/telegram/сайт).")
+        await state.set_state(AiHelpState.waiting_question)
+        await callback.message.answer("Опиши ситуацию")
     await callback.answer()
 
 
-@dp.message(PsychologyState.waiting_contact)
-async def psychology_save_contact(message: types.Message, state: FSMContext):
-    contact = (message.text or "").strip()
-    if not contact:
-        await message.answer("⚠️ Контакт пустой. Отправь телефон/telegram/сайт.")
-        return
-
-    record = get_user_record(DATA_FILE, message.from_user.id)
-    record["psychologist_contact"] = contact
-    set_user_record(DATA_FILE, message.from_user.id, record)
-    await state.clear()
-    await message.answer(f"✅ Контакт сохранен: {contact}", reply_markup=main_menu())
-
-
-@dp.message(PsychologyState.waiting_question)
-async def psychology_ai_run(message: types.Message):
-    user_text = (message.text or "").strip()
-    if not user_text:
-        await message.answer("⚠️ Напиши сообщение для ИИ-психолога.")
-        return
-
+@dp.message(AiHelpState.waiting_question)
+async def ai_help_run(message: types.Message):
     answer = await run_llm_with_status(
         message,
-        status_for_section("psychology"),
-        lambda: ask_llm(
-            openai_client,
-            OPENROUTER_MODEL,
-            OPENROUTER_API_KEY,
-            PSYCHOLOGY_PROMPT,
-            user_text,
-            max_tokens=800,
-        ),
+        status_for("assistant"),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты ИИ-агент помощи: умный, живой, поддерживающий, немного дерзкий.", (message.text or ""), max_tokens=700),
     )
     await message.answer(f"🧠 {answer}")
+
+
+@dp.message(F.text == BTN_NAVIGATOR)
+async def navigator_entry(message: types.Message, state: FSMContext):
+    if not await ensure_premium(message):
+        return
+    await state.clear()
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    if not profile_ready(profile):
+        record["user_life_profile"] = profile
+        set_user_record(DATA_FILE, message.from_user.id, record)
+        await state.set_state(NavigatorState.onboarding)
+        await message.answer("🧭 Стартуем onboarding.\n" + next_onboarding_question(profile), reply_markup=back_menu())
+        return
+    await state.set_state(NavigatorState.coach)
+    goals = "\n".join(f"• {g}" for g in profile.get("goals", []))
+    await message.answer(f"Привет снова.\n\nЯ помню твои цели:\n\n{goals}\n\nСегодняшний фокус:\n\n{profile.get('daily_plan')}", reply_markup=dashboard_kb())
+
+
+@dp.message(NavigatorState.onboarding)
+async def navigator_onboarding(message: types.Message, state: FSMContext):
+    user_text = (message.text or "").strip()
+    if not user_text:
+        await message.answer("Нужен ответ текстом")
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    profile["answers_json"].append({"user": user_text, "time": datetime.now().isoformat()})
+    user_count = len([x for x in profile["answers_json"] if x.get("user")])
+
+    if user_count >= 12:
+        analysis = await run_llm_with_status(
+            message,
+            status_for("navigator"),
+            lambda: ask_llm(
+                openai_client,
+                OPENROUTER_MODEL,
+                OPENROUTER_API_KEY,
+                "Ты AI Life Navigator. На основе ответов дай уникальный архетип, сильные стороны, ограничения, ценности, направления и план на 3 месяца + daily/weekly/monthly.",
+                str(profile["answers_json"][-20:]),
+                max_tokens=950,
+            ),
+        )
+        profile["ai_analysis"] = analysis
+        profile.update(parse_analysis(analysis))
+        profile["last_update"] = datetime.now().isoformat()
+        record["user_life_profile"] = profile
+        set_user_record(DATA_FILE, message.from_user.id, record)
+        await state.set_state(NavigatorState.coach)
+        await message.answer("🎉 Навигация завершена.\nТеперь я твой персональный ассистент.", reply_markup=dashboard_kb())
+        return
+
+    if user_count % 3 == 0:
+        await message.answer("⚡ Похоже, ты практик: быстро переводишь мысли в действия.")
+    q = next_onboarding_question(profile, user_text)
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await message.answer(q)
+
+
+@dp.message(F.text.in_([NAV_BTN_ADVICE, NAV_BTN_GOALS, NAV_BTN_PROFILE, NAV_BTN_TODAY, NAV_BTN_REMIND, NAV_BTN_UPDATE]))
+async def navigator_dashboard_actions(message: types.Message, state: FSMContext):
+    if not await ensure_premium(message):
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+
+    if message.text == NAV_BTN_GOALS:
+        await message.answer("🎯 Мои цели:\n" + "\n".join(f"• {x}" for x in profile.get("goals", [])))
+    elif message.text == NAV_BTN_PROFILE:
+        await message.answer(f"📊 Архетип: {profile.get('archetype')}\n\n{profile.get('ai_analysis','')[:3500]}")
+    elif message.text == NAV_BTN_TODAY:
+        await message.answer(f"📅 План сегодня:\n{profile.get('daily_plan')}")
+    elif message.text == NAV_BTN_REMIND:
+        await state.set_state(NavigatorState.reminders)
+        await message.answer("Режим напоминаний: ежедневно / еженедельно / ежемесячно / off")
+    elif message.text == NAV_BTN_UPDATE:
+        await state.set_state(NavigatorState.update)
+        profile["update_answers"] = []
+        record["user_life_profile"] = profile
+        set_user_record(DATA_FILE, message.from_user.id, record)
+        await message.answer("Что изменилось за 2 недели?")
+    else:
+        await state.set_state(NavigatorState.coach)
+        await message.answer("Напиши вопрос — дам совет с учетом твоего профиля")
+
+
+@dp.message(NavigatorState.reminders)
+async def navigator_reminders(message: types.Message, state: FSMContext):
+    mode = (message.text or "").strip().lower()
+    mapper = {"ежедневно": "daily", "еженедельно": "weekly", "ежемесячно": "monthly", "off": "off"}
+    if mode not in mapper:
+        await message.answer("Формат: ежедневно / еженедельно / ежемесячно / off")
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    profile["reminder_settings"]["mode"] = mapper[mode]
+    profile["reminder_settings"]["last_sent"] = ""
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.set_state(NavigatorState.coach)
+    await message.answer("✅ Настройки сохранены", reply_markup=dashboard_kb())
+
+
+@dp.message(NavigatorState.update)
+async def navigator_update(message: types.Message, state: FSMContext):
+    text = (message.text or "").strip()
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    profile["update_answers"].append(text)
+    if len(profile["update_answers"]) < 3:
+        followups = ["Что дало лучший результат?", "Что мешает прямо сейчас?"]
+        await message.answer(followups[len(profile["update_answers"]) - 1])
+        record["user_life_profile"] = profile
+        set_user_record(DATA_FILE, message.from_user.id, record)
+        return
+    analysis = await run_llm_with_status(
+        message,
+        status_for("navigator"),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Обнови анализ без полного onboarding", str(profile["update_answers"]), max_tokens=800),
+    )
+    profile["ai_analysis"] = analysis
+    profile.update(parse_analysis(analysis))
+    profile["update_answers"] = []
+    profile["last_update"] = datetime.now().isoformat()
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.set_state(NavigatorState.coach)
+    await message.answer("✅ Анализ обновлён", reply_markup=dashboard_kb())
+
+
+@dp.message(NavigatorState.coach)
+async def navigator_coach(message: types.Message):
+    user_text = (message.text or "").strip()
+    if not user_text:
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    history = profile.get("history", [])[-8:]
+    prompt = f"analysis={profile.get('ai_analysis')} goals={profile.get('goals')} history={history} user={user_text}"
+    answer = await run_llm_with_status(
+        message,
+        status_for("navigator"),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты AI Life Navigator. Коучинг: кратко, точно, по делу.", prompt, max_tokens=700),
+    )
+    profile["history"] = history + [{"q": user_text, "a": answer, "time": datetime.now().isoformat()}]
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await message.answer(f"🧭 {answer}")
 
 
 @dp.message(F.text == BTN_ESOTERIC)
@@ -780,127 +415,314 @@ async def esoteric_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
     await state.set_state(EsotericState.waiting_system)
-    await message.answer(
-        "🪄 Раздел Эзотерика\n\n"
-        "Здесь собраны системы по направлениям.\n"
-        "Выбери номер направления (1-24):\n\n"
-        f"{esoteric_catalog_text()}"
-    )
+    buttons = [[InlineKeyboardButton(text=name, callback_data=f"eso:{i}")] for i, name in enumerate(ESOTERIC_MENU.keys(), start=1)]
+    await message.answer("🪄 Выбери направление:", reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
-@dp.message(EsotericState.waiting_system)
-async def esoteric_pick_system(message: types.Message, state: FSMContext):
-    key = (message.text or "").strip()
-    if key not in ESOTERIC_SYSTEMS:
-        await message.answer("⚠️ Введи номер системы от 1 до 24.")
+@dp.callback_query(F.data.startswith("eso:"))
+async def esoteric_pick(callback: types.CallbackQuery, state: FSMContext):
+    idx = int(callback.data.split(":", 1)[1]) - 1
+    names = list(ESOTERIC_MENU.keys())
+    if idx not in range(len(names)):
+        await callback.answer("Ошибка", show_alert=True)
         return
+    name = names[idx]
+    await state.set_state(EsotericState.waiting_payload)
+    await state.update_data(esoteric_name=name)
+    await callback.message.answer(f"{name}\n{ESOTERIC_MENU[name]}")
+    await callback.answer()
 
-    name, prompt = ESOTERIC_SYSTEMS[key]
-    await state.update_data(esoteric_prompt=prompt, esoteric_name=name)
-    await state.set_state(EsotericState.waiting_question)
-    await message.answer(f"✅ Выбрано: {name}\nТеперь отправь данные/вопрос для разбора.")
 
-
-@dp.message(EsotericState.waiting_question)
+@dp.message(EsotericState.waiting_payload)
 async def esoteric_run(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    prompt = data.get("esoteric_prompt")
-    name = data.get("esoteric_name", "Система")
-    user_text = (message.text or "").strip()
-
-    if not prompt or not user_text:
-        await message.answer("⚠️ Не хватает данных. Выбери раздел заново через 🪄 Эзотерика.")
+    name = data.get("esoteric_name")
+    payload = (message.text or "").strip()
+    if not payload or len(payload) < 8:
+        await message.answer("Добавь больше данных по формату")
         return
-
     answer = await run_llm_with_status(
         message,
-        status_for_section("esoteric"),
-        lambda: ask_llm(
-            openai_client,
-            OPENROUTER_MODEL,
-            OPENROUTER_API_KEY,
-            prompt,
-            user_text,
-            max_tokens=850,
-        ),
+        status_for("assistant"),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, f"Ты эксперт {name}. Дай глубокий персональный разбор.", payload, max_tokens=900),
     )
-    await message.answer(f"🪄 {name}\n\n{answer}")
+    await message.answer(f"{name}\n\n{answer}")
 
 
-@dp.message(F.text == BTN_NAVIGATOR)
-async def navigator_menu(message: types.Message, state: FSMContext):
+@dp.message(F.text == BTN_CRYPTO)
+async def crypto_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
-
-    await state.set_state(NavigatorState.waiting_message)
-    record = get_user_record(DATA_FILE, message.from_user.id)
-    nav = record.get("navigator_profile") or {
-        "q_count": 0,
-        "answers_json": [],
-        "insights": "",
-        "ai_analysis": "",
-        "done": False,
-    }
-    record["navigator_profile"] = nav
-    set_user_record(DATA_FILE, message.from_user.id, record)
-
-    await message.answer(
-        "🧭 Тебе точно сюда\n\n"
-        "Я проведу персональную навигацию: вопросы → анализ → план на 3 месяца.\n"
-        "Отвечай свободно, можно коротко или подробно.\n\n"
-        "Стартовый вопрос:\n"
-        "Что сейчас для тебя важнее всего: деньги, свобода, спокойствие или самореализация?"
-    )
+    await state.set_state(CryptoState.waiting_coin)
+    await message.answer("Введи coin id (bitcoin, ethereum, solana)", reply_markup=back_menu())
 
 
-@dp.message(NavigatorState.waiting_message)
-async def navigator_run(message: types.Message):
-    user_text = (message.text or "").strip()
-    if not user_text:
-        await message.answer("⚠️ Напиши ответ, чтобы я продолжил навигацию.")
+@dp.message(CryptoState.waiting_coin)
+async def crypto_run(message: types.Message, state: FSMContext):
+    coin = (message.text or "").strip().lower()
+    if not coin:
+        await message.answer("Нужен coin id")
+        return
+    snapshot = fetch_crypto_snapshot(coin)
+    if not snapshot:
+        await message.answer("Монета не найдена")
+        return
+    prompt = f"Монета {coin}, usd={snapshot.get('usd')}, change24={snapshot.get('usd_24h_change')}, cap={snapshot.get('usd_market_cap')}"
+    answer = await run_llm_with_status(message, status_for("crypto"), lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты крипто-аналитик", prompt, max_tokens=450))
+    await state.clear()
+    await message.answer(answer, reply_markup=user_menu(message.from_user.id))
+
+
+@dp.message(F.text == BTN_PROJECTS)
+async def my_projects(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    projects = get_user_record(DATA_FILE, message.from_user.id).get("projects", [])
+    if not projects:
+        await message.answer("Проектов пока нет")
+        return
+    await message.answer("\n".join([f"• {p.get('topic')} | {p.get('channel')} | {'ON' if p.get('enabled') else 'OFF'}" for p in projects]))
+
+
+@dp.message(F.text == BTN_CREATE_PROJECT)
+async def create_project(message: types.Message, state: FSMContext):
+    if not await ensure_premium(message):
+        return
+    await state.set_state(ProjectState.waiting_channel)
+    await message.answer("STEP 1: отправь @channel_username")
+
+
+@dp.message(ProjectState.waiting_channel)
+async def p_channel(message: types.Message, state: FSMContext):
+    channel = (message.text or "").strip()
+    if not channel.startswith("@"):
+        await message.answer("Нужен @channel")
+        return
+    await state.update_data(channel=channel)
+    await state.set_state(ProjectState.waiting_topic)
+    await message.answer("STEP 2: тема проекта")
+
+
+@dp.message(ProjectState.waiting_topic)
+async def p_topic(message: types.Message, state: FSMContext):
+    await state.update_data(topic=(message.text or "").strip())
+    await state.set_state(ProjectState.waiting_style)
+    await message.answer("STEP 3: стиль (expert/analytical/hype/funny/news)")
+
+
+@dp.message(ProjectState.waiting_style)
+async def p_style(message: types.Message, state: FSMContext):
+    await state.update_data(style=(message.text or "").strip())
+    await state.set_state(ProjectState.waiting_formatting)
+    await message.answer("STEP 4: формат yes/no,yes/no,yes/no,signature")
+
+
+@dp.message(ProjectState.waiting_formatting)
+async def p_format(message: types.Message, state: FSMContext):
+    parts = [x.strip() for x in (message.text or "").split(",")]
+    if len(parts) < 4:
+        await message.answer("Формат: yes/no,yes/no,yes/no,signature")
+        return
+    await state.update_data(formatting={"emojis": parts[0] == "yes", "cta": parts[1] == "yes", "hashtags": parts[2] == "yes", "signature": parts[3]})
+    await state.set_state(ProjectState.waiting_frequency)
+    await message.answer("STEP 5: частота interval:6 / daily / times:09:00|18:00")
+
+
+@dp.message(ProjectState.waiting_frequency)
+async def p_frequency(message: types.Message, state: FSMContext):
+    raw = (message.text or "").strip().lower()
+    frequency = {"mode": "interval", "value": 6}
+    if raw.startswith("interval:"):
+        frequency = {"mode": "interval", "value": max(1, int(raw.split(":", 1)[1]))}
+    elif raw == "daily":
+        frequency = {"mode": "daily", "value": "09:00"}
+    elif raw.startswith("times:"):
+        frequency = {"mode": "times", "value": raw.split(":", 1)[1].split("|")}
+    await state.update_data(frequency=frequency)
+    await state.set_state(ProjectState.waiting_sources)
+    await message.answer("STEP 6: источники через запятую (gpt,rss,api,scrape)")
+
+
+@dp.message(ProjectState.waiting_sources)
+async def p_sources_and_confirm(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    if "project_previewed" not in data:
+        sources = [x.strip() for x in (message.text or "gpt").split(",") if x.strip()]
+        project = default_project()
+        project.update(data)
+        project["id"] = uuid.uuid4().hex[:8]
+        project["sources"] = sources
+        preview = await run_llm_with_status(
+            message,
+            status_for("assistant"),
+            lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Сгенерируй preview поста", str(project), max_tokens=350),
+        )
+        await state.update_data(project=project, project_previewed=True)
+        await message.answer(f"STEP 7 Preview:\n{preview}\n\nSTEP 8: отправь start для запуска")
         return
 
+    if (message.text or "").strip().lower() != "start":
+        await message.answer("Отправь start для запуска проекта")
+        return
+    project = data.get("project")
+    project["enabled"] = True
     record = get_user_record(DATA_FILE, message.from_user.id)
-    nav = record.get("navigator_profile") or {
-        "q_count": 0,
-        "answers_json": [],
-        "insights": "",
-        "ai_analysis": "",
-        "done": False,
-    }
-
-    nav["answers_json"].append({"user": user_text})
-    nav["q_count"] = int(nav.get("q_count", 0)) + 1
-
-    context_payload = {
-        "answers_json": nav.get("answers_json", []),
-        "insights": nav.get("insights", ""),
-        "ai_analysis": nav.get("ai_analysis", ""),
-        "q_count": nav.get("q_count", 0),
-        "last_user_answer": user_text,
-    }
-
-    answer = await run_llm_with_status(
-        message,
-        status_for_section("navigator"),
-        lambda: ask_llm(
-            openai_client,
-            OPENROUTER_MODEL,
-            OPENROUTER_API_KEY,
-            NAVIGATOR_PROMPT,
-            f"Текущий профиль: {context_payload}",
-            max_tokens=1000,
-        ),
-    )
-
-    nav["answers_json"].append({"ai": answer})
-    if "Сейчас соберу твою карту развития" in answer:
-        nav["done"] = True
-        nav["ai_analysis"] = answer
-
-    record["navigator_profile"] = nav
+    record.setdefault("projects", []).append(project)
     set_user_record(DATA_FILE, message.from_user.id, record)
-    await message.answer(f"🧭 {answer}")
+    await state.clear()
+    await message.answer("✅ Проект автопостинга запущен", reply_markup=user_menu(message.from_user.id))
+
+
+@dp.message(F.text == BTN_AUTOPOST)
+async def autopost_menu(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    await message.answer("📣 Классический режим автопостинга каналов", reply_markup=autopost_menu_keyboard())
+
+
+@dp.message(F.text == BTN_ADD_CHANNEL)
+async def add_channel(message: types.Message, state: FSMContext):
+    if not await ensure_premium(message):
+        return
+    await state.set_state(ChannelSetupState.waiting_name)
+    await message.answer("Название канала", reply_markup=back_menu())
+
+
+@dp.message(ChannelSetupState.waiting_name)
+async def ch_name(message: types.Message, state: FSMContext):
+    await state.update_data(name=(message.text or "").strip())
+    await state.set_state(ChannelSetupState.waiting_chat_id)
+    await message.answer("chat_id канала (-100...)")
+
+
+@dp.message(ChannelSetupState.waiting_chat_id)
+async def ch_id(message: types.Message, state: FSMContext):
+    chat_id = (message.text or "").strip()
+    if not chat_id.startswith("-100"):
+        await message.answer("Неверный chat_id")
+        return
+    await state.update_data(chat_id=chat_id)
+    await state.set_state(ChannelSetupState.waiting_topic)
+    await message.answer("Тема")
+
+
+@dp.message(ChannelSetupState.waiting_topic)
+async def ch_topic(message: types.Message, state: FSMContext):
+    await state.update_data(topic=(message.text or "").strip())
+    await state.set_state(ChannelSetupState.waiting_sample)
+    await message.answer("Пример поста или '-' ")
+
+
+@dp.message(ChannelSetupState.waiting_sample)
+async def ch_sample(message: types.Message, state: FSMContext):
+    sample = (message.text or "").strip()
+    await state.update_data(sample_post="" if sample == "-" else sample)
+    await state.set_state(ChannelSetupState.waiting_mode)
+    kb = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="⏱ Интервал", callback_data="mode:interval")],
+            [InlineKeyboardButton(text="🕒 Фикс", callback_data="mode:fixed")],
+            [InlineKeyboardButton(text="🎲 Рандом", callback_data="mode:random")],
+        ]
+    )
+    await message.answer("Выбери режим", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("mode:"))
+async def ch_mode(callback: types.CallbackQuery, state: FSMContext):
+    mode = callback.data.split(":", 1)[1]
+    await state.update_data(mode=mode)
+    if mode == "interval":
+        await state.set_state(ChannelSetupState.waiting_interval)
+        await callback.message.answer("Введите интервал в часах")
+    elif mode == "fixed":
+        await state.set_state(ChannelSetupState.waiting_fixed_times)
+        await callback.message.answer("Введите HH:MM,HH:MM")
+    else:
+        await state.set_state(ChannelSetupState.waiting_random_window)
+        await callback.message.answer("Введите start,end,count")
+    await callback.answer()
+
+
+async def save_channel(message: types.Message, state: FSMContext, mode: str, interval_hours=6, fixed_times=None, random_window=None):
+    data = await state.get_data()
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    channel = {
+        "name": data["name"],
+        "chat_id": int(data["chat_id"]),
+        "topic": data["topic"],
+        "enabled": True,
+        "mode": mode,
+        "interval_hours": interval_hours,
+        "fixed_times": fixed_times or ["12:00"],
+        "random_window": random_window or {"start": 9, "end": 21, "posts_per_day": 2},
+        "next_run": (datetime.now() + timedelta(minutes=2)).isoformat(),
+        "last_plan_date": "",
+        "pending_today": [],
+        "history": [],
+        "sample_post": data.get("sample_post", ""),
+    }
+    record.setdefault("channels", []).append(channel)
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.clear()
+    await message.answer("✅ Канал добавлен", reply_markup=user_menu(message.from_user.id))
+
+
+@dp.message(ChannelSetupState.waiting_interval)
+async def ch_interval(message: types.Message, state: FSMContext):
+    await save_channel(message, state, mode="interval", interval_hours=max(1, int((message.text or "6").strip())))
+
+
+@dp.message(ChannelSetupState.waiting_fixed_times)
+async def ch_fixed(message: types.Message, state: FSMContext):
+    times = [x.strip() for x in (message.text or "").split(",") if x.strip()]
+    await save_channel(message, state, mode="fixed", fixed_times=times)
+
+
+@dp.message(ChannelSetupState.waiting_random_window)
+async def ch_random(message: types.Message, state: FSMContext):
+    start, end, count = [int(x.strip()) for x in (message.text or "9,21,2").split(",")]
+    await save_channel(message, state, mode="random", random_window={"start": start, "end": end, "posts_per_day": count})
+
+
+@dp.message(F.text == BTN_MY)
+async def my_channels(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    channels = get_user_record(DATA_FILE, message.from_user.id).get("channels", [])
+    if not channels:
+        await message.answer("Каналы не добавлены")
+        return
+    await message.answer("\n".join([f"• {c['name']} | {c['topic']} | {c['mode']}" for c in channels]))
+
+
+@dp.message(F.text == BTN_GROUP)
+async def group_menu(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    perms = record.get("group_permissions") or default_group_permissions()
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=f"{'✅' if perms.get(k) else '❌'} {k}", callback_data=f"gp:{k}")] for k in ["write", "edit", "delete", "ban", "posts"]])
+    await message.answer("Группы и права", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("gp:"))
+async def group_toggle(callback: types.CallbackQuery):
+    key = callback.data.split(":", 1)[1]
+    record = get_user_record(DATA_FILE, callback.from_user.id)
+    perms = record.get("group_permissions") or default_group_permissions()
+    perms[key] = not perms.get(key, False)
+    record["group_permissions"] = perms
+    set_user_record(DATA_FILE, callback.from_user.id, record)
+    await callback.answer("Обновлено")
+
+
+@dp.message(F.text == BTN_ACCOUNT)
+async def account(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    await message.answer(f"Аккаунт: premium={record.get('premium')} | projects={len(record.get('projects', []))}")
 
 
 async def autopost_loop():
@@ -908,69 +730,85 @@ async def autopost_loop():
         try:
             users = load_users(DATA_FILE)
             now = datetime.now()
-
             for user_id, record in users.items():
-                perms = record.get("group_permissions") or default_group_permissions()
-                if not perms.get("posts", True):
+                if not (record.get("group_permissions") or default_group_permissions()).get("posts", True):
                     continue
-
-                channels = record.get("channels", [])
-                for ch in channels:
+                for ch in record.get("channels", []):
                     ensure_channel_defaults(ch)
                     if not ch.get("enabled") or not is_due(ch, now):
                         continue
-
                     prompt = build_post_prompt(ch)
-                    post_text = ""
-                    for _ in range(4):
-                        candidate = ask_llm(
-                            openai_client,
-                            OPENROUTER_MODEL,
-                            OPENROUTER_API_KEY,
-                            "Ты сильный редактор Telegram-каналов. Пиши ярко, полезно, без воды.",
-                            prompt,
-                            max_tokens=500,
-                        )
+                    post = ""
+                    for _ in range(3):
+                        candidate = ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты редактор Telegram-канала", prompt, max_tokens=500)
                         if candidate and not hash_exists(ch, candidate):
-                            post_text = candidate
+                            post = candidate
                             break
-
-                    if post_text.startswith("⚠️ Ошибка авторизации OpenRouter") or post_text.startswith("⚠️ OPENROUTER_API_KEY"):
-                        mark_sent(ch, now)
-                        continue
-
-                    if not post_text:
-                        post_text = "⚠️ Не удалось сгенерировать уникальный пост. Проверь ключ ИИ и попробуй позже."
-
+                    post = post or "⚠️ Не удалось сгенерировать уникальный пост"
                     if bot is not None:
-                        await bot.send_message(ch["chat_id"], f"📣 {post_text}")
-
-                    add_history_text(ch, post_text)
+                        await bot.send_message(ch["chat_id"], f"📣 {post}")
+                    add_history_text(ch, post)
                     mark_sent(ch, now)
 
-                record["channels"] = channels
+                for p in record.get("projects", []):
+                    if not p.get("enabled"):
+                        continue
+                    p.setdefault("next_run", (now + timedelta(hours=1)).isoformat())
+                    if now < datetime.fromisoformat(p["next_run"]):
+                        continue
+                    post = ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "SaaS autopost generator", str(p), max_tokens=450)
+                    if bot is not None:
+                        await bot.send_message(p.get("channel"), post)
+                    hours = int(p.get("frequency", {}).get("value", 6)) if p.get("frequency", {}).get("mode") == "interval" else 24
+                    p["next_run"] = (now + timedelta(hours=hours)).isoformat()
                 users[user_id] = record
-
             save_users(DATA_FILE, users)
         except Exception as e:
             print("AUTPOST ERROR:", e)
-
         await asyncio.sleep(30)
+
+
+async def reminder_loop():
+    while True:
+        try:
+            users = load_users(DATA_FILE)
+            now = datetime.now()
+            today_key = now.strftime("%Y-%m-%d")
+            for user_id, record in users.items():
+                profile = record.get("user_life_profile") or {}
+                rem = profile.get("reminder_settings", {})
+                mode = rem.get("mode", "off")
+                if mode == "off":
+                    continue
+                due = mode == "daily" or (mode == "weekly" and now.weekday() == 0) or (mode == "monthly" and now.day == 1)
+                if due and rem.get("last_sent") != today_key and bot is not None:
+                    await bot.send_message(
+                        int(user_id),
+                        f"Сегодня:\n{profile.get('daily_plan','-')}\n\nНеделя:\n{profile.get('weekly_plan','-')}\n\nМесяц:\n{profile.get('monthly_plan','-')}",
+                    )
+                    rem["last_sent"] = today_key
+                    profile["reminder_settings"] = rem
+                    record["user_life_profile"] = profile
+                    users[user_id] = record
+            save_users(DATA_FILE, users)
+        except Exception as e:
+            print("REMINDER ERROR:", e)
+        await asyncio.sleep(60)
 
 
 @dp.message()
 async def fallback(message: types.Message):
-    await message.answer("🤝 Я не понял команду. Используй кнопки меню ниже или /start", reply_markup=main_menu())
+    await message.answer("Используй меню 👇", reply_markup=user_menu(message.from_user.id))
 
 
 async def main():
     global bot
-    token_error = build_token_error()
-    if token_error:
-        raise RuntimeError(token_error)
-
+    err = build_token_error()
+    if err:
+        raise RuntimeError(err)
     bot = Bot(BOT_TOKEN)
     asyncio.create_task(autopost_loop())
+    asyncio.create_task(reminder_loop())
     await dp.start_polling(bot)
 
 
