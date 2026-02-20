@@ -25,7 +25,6 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
     if not is_premium:
         return ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text=BTN_AI)],
                 [KeyboardButton(text=BTN_ACCESS)],
             ],
             resize_keyboard=True,
@@ -54,7 +53,7 @@ def project_hub_keyboard() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text=BTN_PROJECT_WIZARD)],
             [KeyboardButton(text=BTN_PROJECTS), KeyboardButton(text=BTN_AUTOPOST)],
-            [KeyboardButton(text=BTN_MY), KeyboardButton(text=BTN_GROUP)],
+            [KeyboardButton(text=BTN_GROUP)],
             [KeyboardButton(text=BTN_ACCOUNT)],
             [KeyboardButton(text=BTN_BACK)],
         ],

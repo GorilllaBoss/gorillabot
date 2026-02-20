@@ -176,6 +176,24 @@ def user_menu(user_id: int):
     return main_menu(user_has_premium(DATA_FILE, user_id))
 
 
+def is_premium_only_module(text: str) -> bool:
+    premium_buttons = {
+        BTN_AI,
+        BTN_PSYCHOLOGY,
+        BTN_NAVIGATOR,
+        BTN_ESOTERIC,
+        BTN_CRYPTO,
+        BTN_CREATE_PROJECT,
+        BTN_PROJECT_WIZARD,
+        BTN_PROJECTS,
+        BTN_AUTOPOST,
+        BTN_MY,
+        BTN_GROUP,
+        BTN_ACCOUNT,
+    }
+    return text in premium_buttons
+
+
 def current_module_from_text(text: str) -> str:
     mapping = {
         BTN_AI: "assistant",
@@ -226,6 +244,21 @@ def dashboard_kb() -> ReplyKeyboardMarkup:
 
 def profile_ready(profile: dict) -> bool:
     return bool(profile.get("ai_analysis")) and bool(profile.get("answers_json"))
+
+
+def format_freq_label(raw: str) -> str:
+    val = str(raw or "1")
+    mapping = {"1": "1 пост/день", "3": "3 поста/день", "5": "5 постов/день", "random": "Random"}
+    return mapping.get(val, val)
+
+
+def next_project_interval_minutes(project: dict) -> int:
+    freq = str(project.get("posting_frequency", "1"))
+    if freq == "random":
+        return random.randint(180, 480)
+    if freq.isdigit() and int(freq) > 0:
+        return max(30, int(1440 / int(freq)))
+    return 1440
 
 
 def parse_analysis(text: str) -> dict:
@@ -316,6 +349,10 @@ async def cmd_menu(message: types.Message):
 ]))
 async def route_menu_buttons(message: types.Message, state: FSMContext):
     text = message.text
+    if not user_has_premium(DATA_FILE, message.from_user.id) and is_premium_only_module(text):
+        await message.answer("🔐 Сначала активируй премиум-доступ по коду.", reply_markup=user_menu(message.from_user.id))
+        return
+
     await persist_flow_snapshot(message, state, current_module_from_text(text))
     if await state.get_state():
         await state.clear()
@@ -379,6 +416,8 @@ async def process_access_code(message: types.Message, state: FSMContext):
 @dp.message(F.text == BTN_AI)
 @dp.message(Command("ask"))
 async def ask_ai(message: types.Message, state: FSMContext):
+    if not await ensure_premium(message):
+        return
     text = (message.text or "").replace("/ask", "", 1).strip()
     if not text:
         await state.set_state(AssistantState.waiting_question)
@@ -658,13 +697,71 @@ async def my_projects(message: types.Message):
     if not projects:
         await message.answer("Проектов пока нет")
         return
+
     lines = ["📁 Твои проекты:"]
+    kb_rows = []
     for p in projects:
-        lines.append(
-            f"• {p.get('channel_username') or p.get('channel')} | {p.get('theme') or p.get('topic')} | "
-            f"{p.get('posting_frequency', '1 пост/день')} | {'ON' if p.get('is_autopost_enabled') else 'OFF'}"
-        )
-    await message.answer("\n".join(lines))
+        pid = p.get("id", "")
+        channel = p.get("channel_username") or p.get("channel") or "—"
+        theme = p.get("theme") or p.get("topic") or "—"
+        freq = format_freq_label(p.get("posting_frequency", "1"))
+        ptime = p.get("posting_time", "09:00")
+        status = "ON" if p.get("is_autopost_enabled") else "OFF"
+        next_run = p.get("next_run", "—")[:16].replace("T", " ") if p.get("next_run") else "—"
+        lines.append(f"• {channel}\n  Тема: {theme}\n  Частота: {freq} | Время: {ptime}\n  Автопостинг: {status} | Следующий пост: {next_run}")
+        if pid:
+            kb_rows.append([InlineKeyboardButton(text=f"Открыть {channel}", callback_data=f"projopen:{pid}")])
+
+    await message.answer("\n".join(lines), reply_markup=InlineKeyboardMarkup(inline_keyboard=kb_rows[:20]) if kb_rows else None)
+
+
+async def send_project_dashboard(chat_obj: types.Message | types.CallbackQuery, project: dict):
+    pid = project.get("id", "")
+    channel = project.get("channel_username") or project.get("channel") or "—"
+    theme = project.get("theme") or project.get("topic") or "—"
+    freq = format_freq_label(project.get("posting_frequency", "1"))
+    ptime = project.get("posting_time", "09:00")
+    srcs = ", ".join(project.get("content_sources", ["AI генерация"]))
+    status = "ON" if project.get("is_autopost_enabled") else "OFF"
+    next_run = project.get("next_run", "—")[:16].replace("T", " ") if project.get("next_run") else "—"
+    last_post_at = project.get("last_post_at", "—")[:16].replace("T", " ") if project.get("last_post_at") else "—"
+    last_error = project.get("last_error", "")
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Редактировать тему", callback_data=f"projdash:theme:{pid}")],
+        [InlineKeyboardButton(text="📝 Примеры постов", callback_data=f"projdash:examples:{pid}")],
+        [InlineKeyboardButton(text="⏰ Автопостинг", callback_data=f"projdash:auto:{pid}")],
+        [InlineKeyboardButton(text="🎨 Оформление", callback_data=f"projdash:style:{pid}")],
+        [InlineKeyboardButton(text="📅 Расписание", callback_data=f"projdash:schedule:{pid}")],
+        [InlineKeyboardButton(text="📡 Источники", callback_data=f"projdash:sources:{pid}")],
+        [InlineKeyboardButton(text="❌ Удалить", callback_data=f"projdash:delete:{pid}")],
+    ])
+    text = (
+        f"📊 Проект: {channel}\n\n"
+        f"Тема: {theme}\n"
+        f"Частота: {freq}\n"
+        f"Время: {ptime}\n"
+        f"Источники: {srcs}\n"
+        f"Автопостинг: {status}\n"
+        f"Следующий пост: {next_run}\n"
+        f"Последний пост: {last_post_at}" + (f"\nОшибка: {last_error}" if last_error else "")
+    )
+    if isinstance(chat_obj, types.CallbackQuery):
+        await chat_obj.message.answer(text, reply_markup=kb)
+    else:
+        await chat_obj.answer(text, reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("projopen:"))
+async def open_project_from_list(callback: types.CallbackQuery):
+    pid = callback.data.split(":", 1)[1]
+    record = get_user_record(DATA_FILE, callback.from_user.id)
+    project = next((p for p in record.get("projects", []) if p.get("id") == pid), None)
+    if not project:
+        await callback.answer("Проект не найден", show_alert=True)
+        return
+    await send_project_dashboard(callback, project)
+    await callback.answer()
 
 
 @dp.message(F.text == BTN_CREATE_PROJECT)
@@ -894,12 +991,15 @@ async def project_step_7_time_value(message: types.Message, state: FSMContext):
 
         project["posting_time"] = val
         project["updated_at"] = datetime.now().isoformat()
+        project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+        project["last_error"] = ""
         project.setdefault("frequency", {})["value"] = val
         project.setdefault("scheduler_settings", {})["random_mode"] = edit_time_mode == "random"
         set_user_record(DATA_FILE, message.from_user.id, record)
 
         await state.clear()
         await message.answer("✅ Расписание проекта обновлено")
+        await send_project_dashboard(message, project)
         return
 
     await state.update_data(posting_time=val, project_step=7)
@@ -999,28 +1099,21 @@ async def project_launch(callback: types.CallbackQuery, state: FSMContext):
     project["scheduler_settings"]["daily_posts"] = daily_posts
     project["frequency"] = {"mode": "daily", "value": project["posting_time"]}
     project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_post_at"] = ""
+    project["last_error"] = ""
 
     record = get_user_record(DATA_FILE, callback.from_user.id)
     record.setdefault("projects", []).append(project)
     set_user_record(DATA_FILE, callback.from_user.id, record)
     await state.clear()
 
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✏️ Редактировать тему", callback_data=f"projdash:theme:{project['id']}")],
-        [InlineKeyboardButton(text="📝 Примеры постов", callback_data=f"projdash:examples:{project['id']}")],
-        [InlineKeyboardButton(text="⏰ Автопостинг", callback_data=f"projdash:auto:{project['id']}")],
-        [InlineKeyboardButton(text="🎨 Оформление", callback_data=f"projdash:style:{project['id']}")],
-        [InlineKeyboardButton(text="📅 Расписание", callback_data=f"projdash:schedule:{project['id']}")],
-        [InlineKeyboardButton(text="📡 Источники", callback_data=f"projdash:sources:{project['id']}")],
-        [InlineKeyboardButton(text="➕ Добавить канал", callback_data="proj:start")],
-        [InlineKeyboardButton(text="❌ Удалить", callback_data=f"projdash:delete:{project['id']}")],
-    ])
-    await callback.message.answer(f"📊 Проект: {project['channel_username']} создан", reply_markup=kb)
+    await send_project_dashboard(callback, project)
     await callback.answer("Проект запущен")
 
 
 @dp.callback_query(F.data.startswith("projdash:"))
-async def project_dashboard_actions(callback: types.CallbackQuery):
+async def project_dashboard_actions(callback: types.CallbackQuery, state: FSMContext):
     parts = callback.data.split(":")
     action = parts[1]
     project_id = parts[2] if len(parts) > 2 else ""
@@ -1042,6 +1135,7 @@ async def project_dashboard_actions(callback: types.CallbackQuery):
         project["enabled"] = project["is_autopost_enabled"]
         set_user_record(DATA_FILE, callback.from_user.id, record)
         await callback.message.answer(f"⏰ Автопостинг: {'ON' if project['is_autopost_enabled'] else 'OFF'}")
+        await send_project_dashboard(callback, project)
         await callback.answer()
         return
 
@@ -1058,13 +1152,35 @@ async def project_dashboard_actions(callback: types.CallbackQuery):
         await callback.answer()
         return
 
-    hints = {
-        "theme": "✏️ Тема меняется через мастер: кнопка «Изменить».",
-        "examples": "📝 Примеры постов добавляются на STEP 5.",
-        "style": "🎨 Оформление меняется на STEP 9.",
-        "sources": "📡 Источники меняются на STEP 8.",
-    }
-    await callback.message.answer(hints.get(action, "Функция в разработке"))
+    if action == "theme":
+        await state.set_state(ProjectState.edit_theme)
+        await state.update_data(edit_project_id=project_id)
+        await callback.message.answer("✏️ Введи новую тему проекта")
+        await callback.answer()
+        return
+
+    if action == "examples":
+        await state.set_state(ProjectState.edit_examples)
+        await state.update_data(edit_project_id=project_id)
+        await callback.message.answer("📝 Пришли новый пример поста. Можно отправлять несколько сообщений, затем нажми ⬅️ Назад.")
+        await callback.answer()
+        return
+
+    if action == "style":
+        await state.set_state(ProjectState.edit_style)
+        await state.update_data(edit_project_id=project_id)
+        await callback.message.answer("🎨 Введи стиль: короткие посты / аналитика / с эмодзи / строго деловой")
+        await callback.answer()
+        return
+
+    if action == "sources":
+        await state.set_state(ProjectState.edit_sources)
+        await state.update_data(edit_project_id=project_id)
+        await callback.message.answer("📡 Введи источники через запятую (AI генерация, RSS, Telegram каналы)")
+        await callback.answer()
+        return
+
+    await callback.message.answer("Функция в разработке")
     await callback.answer()
 
 
@@ -1080,6 +1196,8 @@ async def project_dashboard_frequency(callback: types.CallbackQuery):
 
     project["posting_frequency"] = freq
     project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_error"] = ""
     scheduler = project.setdefault("scheduler_settings", {})
     if freq == "random":
         scheduler["daily_posts"] = 3
@@ -1088,7 +1206,8 @@ async def project_dashboard_frequency(callback: types.CallbackQuery):
         scheduler["daily_posts"] = int(freq)
         scheduler["random_mode"] = False
     set_user_record(DATA_FILE, callback.from_user.id, record)
-    await callback.message.answer(f"✅ Частота обновлена: {freq}")
+    await callback.message.answer(f"✅ Частота обновлена: {format_freq_label(freq)}")
+    await send_project_dashboard(callback, project)
     await callback.answer()
 
 
@@ -1102,6 +1221,105 @@ async def project_dashboard_time_mode(callback: types.CallbackQuery, state: FSMC
     else:
         await callback.message.answer("Введи диапазон в формате HH:MM-HH:MM (например 09:00-21:00)")
     await callback.answer()
+
+
+@dp.message(ProjectState.edit_theme)
+async def project_edit_theme_value(message: types.Message, state: FSMContext):
+    theme = (message.text or "").strip()
+    if len(theme) < 2:
+        await message.answer("⚠️ Тема слишком короткая")
+        return
+    data = await state.get_data()
+    pid = data.get("edit_project_id")
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    project = next((p for p in record.get("projects", []) if p.get("id") == pid), None)
+    if not project:
+        await state.clear()
+        await message.answer("⚠️ Проект не найден", reply_markup=user_menu(message.from_user.id))
+        return
+    project["theme"] = theme
+    project["topic"] = theme
+    project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_error"] = ""
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.clear()
+    await message.answer("✅ Тема обновлена")
+    await send_project_dashboard(message, project)
+
+
+@dp.message(ProjectState.edit_examples)
+async def project_edit_examples_value(message: types.Message, state: FSMContext):
+    example = (message.text or "").strip()
+    if not example:
+        return
+    data = await state.get_data()
+    pid = data.get("edit_project_id")
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    project = next((p for p in record.get("projects", []) if p.get("id") == pid), None)
+    if not project:
+        await state.clear()
+        await message.answer("⚠️ Проект не найден", reply_markup=user_menu(message.from_user.id))
+        return
+    project.setdefault("example_posts", []).append(example)
+    project["example_posts"] = project["example_posts"][-20:]
+    project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_error"] = ""
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await message.answer(f"✅ Пример добавлен. Всего: {len(project.get('example_posts', []))}")
+    await send_project_dashboard(message, project)
+
+
+@dp.message(ProjectState.edit_style)
+async def project_edit_style_value(message: types.Message, state: FSMContext):
+    style = (message.text or "").strip()
+    if len(style) < 2:
+        await message.answer("⚠️ Введи стиль текстом")
+        return
+    data = await state.get_data()
+    pid = data.get("edit_project_id")
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    project = next((p for p in record.get("projects", []) if p.get("id") == pid), None)
+    if not project:
+        await state.clear()
+        await message.answer("⚠️ Проект не найден", reply_markup=user_menu(message.from_user.id))
+        return
+    project["post_style"] = style
+    project["style"] = style
+    project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_error"] = ""
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.clear()
+    await message.answer("✅ Оформление обновлено")
+    await send_project_dashboard(message, project)
+
+
+@dp.message(ProjectState.edit_sources)
+async def project_edit_sources_value(message: types.Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    sources = [x.strip() for x in raw.split(",") if x.strip()]
+    if not sources:
+        await message.answer("⚠️ Введи хотя бы один источник")
+        return
+    data = await state.get_data()
+    pid = data.get("edit_project_id")
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    project = next((p for p in record.get("projects", []) if p.get("id") == pid), None)
+    if not project:
+        await state.clear()
+        await message.answer("⚠️ Проект не найден", reply_markup=user_menu(message.from_user.id))
+        return
+    project["content_sources"] = sources
+    project["sources"] = [x.lower() for x in sources]
+    project["updated_at"] = datetime.now().isoformat()
+    project["next_run"] = (datetime.now() + timedelta(minutes=1)).isoformat()
+    project["last_error"] = ""
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.clear()
+    await message.answer("✅ Источники обновлены")
+    await send_project_dashboard(message, project)
 
 
 @dp.message(F.text == BTN_AUTOPOST)
@@ -1284,14 +1502,43 @@ async def autopost_loop():
                 for p in record.get("projects", []):
                     if not p.get("enabled"):
                         continue
-                    p.setdefault("next_run", (now + timedelta(hours=1)).isoformat())
-                    if now < datetime.fromisoformat(p["next_run"]):
+                    p.setdefault("next_run", (now + timedelta(minutes=1)).isoformat())
+                    try:
+                        next_run = datetime.fromisoformat(p["next_run"])
+                    except Exception:
+                        next_run = now
+                    if now < next_run:
                         continue
-                    post = ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "SaaS autopost generator", str(p), max_tokens=450)
+
+                    destination = p.get("channel_username") or p.get("channel")
+                    if not destination:
+                        p["last_error"] = "Не указан канал проекта"
+                        p["next_run"] = (now + timedelta(minutes=10)).isoformat()
+                        continue
+
+                    prompt = (
+                        f"Канал: {destination}\n"
+                        f"Тема: {p.get('topic') or p.get('theme')}\n"
+                        f"Стиль: {p.get('post_style')}\n"
+                        f"Источники: {', '.join(p.get('content_sources', ['AI генерация']))}\n"
+                        f"Примеры: {' || '.join(p.get('example_posts', [])[:5])}"
+                    )
+                    post = ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты создаёшь пост для Telegram-канала пользователя", prompt, max_tokens=450)
                     if bot is not None:
-                        await bot.send_message(p.get("channel"), post)
-                    hours = int(p.get("frequency", {}).get("value", 6)) if p.get("frequency", {}).get("mode") == "interval" else 24
-                    p["next_run"] = (now + timedelta(hours=hours)).isoformat()
+                        try:
+                            await bot.send_message(destination, post)
+                            p.setdefault("history", []).append({"ts": now.isoformat(), "text": post[:400]})
+                            p["history"] = p["history"][-50:]
+                            p["last_post_at"] = now.isoformat()
+                            p["last_error"] = ""
+                        except Exception as send_err:
+                            p["last_error"] = str(send_err)
+                            try:
+                                await bot.send_message(int(user_id), f"⚠️ Не удалось отправить пост в {destination}: {send_err}")
+                            except Exception:
+                                pass
+                    p["updated_at"] = now.isoformat()
+                    p["next_run"] = (now + timedelta(minutes=next_project_interval_minutes(p))).isoformat()
                 users[user_id] = record
             save_users(DATA_FILE, users)
         except Exception as e:

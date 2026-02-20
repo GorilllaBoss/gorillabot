@@ -43,6 +43,10 @@ class ProjectState(StatesGroup):
     sources = State()
     format_style = State()
     summary = State()
+    edit_theme = State()
+    edit_examples = State()
+    edit_sources = State()
+    edit_style = State()
 
 
 class ChannelSetupState(StatesGroup):
