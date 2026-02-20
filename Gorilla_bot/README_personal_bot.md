@@ -1,6 +1,6 @@
 # Personal Telegram Bot (MVP)
 
-Файл `personal_assistant_bot.py` — это заготовка под личного Telegram-бота с разделением доступа:
+Файл `bot.py` — это заготовка под личного Telegram-бота с разделением доступа:
 
 - `/ask` — публичный AI-ассистент (доступен всем)
 - приватные функции по коду (`/access`):
@@ -22,7 +22,7 @@ cp .env.example .env
 set -a
 source .env
 set +a
-python personal_assistant_bot.py
+python bot.py
 ```
 
 ### Windows PowerShell
@@ -39,7 +39,7 @@ Get-Content .env | ForEach-Object {
   $name, $value = $_ -split '=', 2
   [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim().Trim('"'), 'Process')
 }
-python personal_assistant_bot.py
+python bot.py
 ```
 
 
@@ -67,7 +67,7 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 1. В файле `.env` строка должна быть ровно в таком формате:
    `BOT_TOKEN=123456789:AA...`
 2. Не оставляй текст-заглушку `YOUR_TELEGRAM_BOT_TOKEN`.
-3. Убедись, что `.env` лежит либо рядом со скриптом `personal_assistant_bot.py`, либо в текущей папке запуска.
+3. Убедись, что `.env` лежит либо рядом со скриптом `bot.py`, либо в текущей папке запуска.
 4. Возьми новый токен у `@BotFather`, если сомневаешься в текущем.
 
 ## Если видишь ошибку `401 User not found` (OpenRouter)
@@ -123,7 +123,7 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 
 Да, так удобнее редактировать 👌 Теперь код разделён по модулям:
 
-- `personal_assistant_bot.py` — точка входа, роутинг хендлеров.
+- `bot.py` — точка входа, роутинг хендлеров.
 - `personal_bot/config.py` — `.env`, конфиг и проверка токена.
 - `personal_bot/storage.py` — работа с JSON-хранилищем пользователей.
 - `personal_bot/services.py` — интеграции (OpenRouter/CoinGecko).
