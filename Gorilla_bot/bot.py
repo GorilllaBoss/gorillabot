@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from personal_bot.config import ACCESS_CODE, BINANCE_API_KEY, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
 from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
-from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot
+from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot, resolve_binance_pair_input
 from personal_bot.states import AccessCodeState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState, PsychologyState
 from personal_bot.storage import default_group_permissions, default_life_profile, default_project, get_user_record, load_users, save_users, set_user_record, user_has_premium
 from personal_bot.ui import (
@@ -357,6 +357,9 @@ async def back_to_menu(message: types.Message, state: FSMContext):
 @dp.message(F.text == BTN_ACCESS)
 @dp.message(Command("access"))
 async def cmd_access(message: types.Message, state: FSMContext):
+    if user_has_premium(DATA_FILE, message.from_user.id):
+        await message.answer("✅ Премиум уже активирован", reply_markup=user_menu(message.from_user.id))
+        return
     await state.set_state(AccessCodeState.waiting_code)
     await message.answer("🔑 Введи код доступа", reply_markup=back_menu())
 
@@ -626,17 +629,23 @@ async def crypto_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
     await state.set_state(CryptoState.waiting_coin)
-    await message.answer("Введи торговую пару Binance (например BTC/USDT, ETH/USDT)", reply_markup=back_menu())
+    await message.answer("Введи монету или пару Binance: биткоин / btc / ETH / BTC/USDT", reply_markup=back_menu())
 
 
 @dp.message(CryptoState.waiting_coin)
 async def crypto_run(message: types.Message, state: FSMContext):
-    pair = (message.text or "").strip().upper()
-    if not pair:
-        await message.answer("Нужен формат пары, пример: BTC/USDT")
+    raw = (message.text or "").strip()
+    resolved = resolve_binance_pair_input(raw)
+    if not resolved.get("ok"):
+        hints = ", ".join(resolved.get("suggestions", ["BTC/USDT", "ETH/USDT"]))
+        await message.answer(f"⚠️ {resolved.get('error', 'Не понял запрос')}\nПопробуй один из вариантов: {hints}")
         return
 
+    pair = resolved["pair"]
     report = await asyncio.to_thread(analyze_binance_pair, pair, BINANCE_API_KEY)
+    if report.startswith("⚠️"):
+        await message.answer(report + "\nПопробуй другой вариант: BTC/USDT, ETH/USDT, LINK/USDT")
+        return
     await state.clear()
     await message.answer(report, reply_markup=user_menu(message.from_user.id))
 

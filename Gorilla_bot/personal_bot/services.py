@@ -1,3 +1,4 @@
+import difflib
 import json
 import math
 import statistics
@@ -6,6 +7,66 @@ import urllib.request
 
 from openai import OpenAI
 from openai import AuthenticationError, OpenAIError
+
+
+PAIR_ALIASES = {
+    "биткоин": "BTC",
+    "биток": "BTC",
+    "btc": "BTC",
+    "эфир": "ETH",
+    "эфириум": "ETH",
+    "eth": "ETH",
+    "линк": "LINK",
+    "link": "LINK",
+    "апт": "APT",
+    "apt": "APT",
+    "оп": "OP",
+    "optimism": "OP",
+    "op": "OP",
+    "арб": "ARB",
+    "arbitrum": "ARB",
+    "arb": "ARB",
+    "bnb": "BNB",
+    "sol": "SOL",
+    "сол": "SOL",
+}
+
+
+def resolve_binance_pair_input(user_text: str) -> dict:
+    text = (user_text or "").strip().lower().replace(" ", "")
+    if not text:
+        return {"ok": False, "error": "Пустой запрос.", "suggestions": ["BTC/USDT", "ETH/USDT", "LINK/USDT", "APT/USDT", "OP/USDT", "ARB/USDT"]}
+
+    if "/" in text:
+        base, quote = text.split("/", 1)
+        base = PAIR_ALIASES.get(base, base).upper()
+        quote = quote.upper()
+        if not base or not quote:
+            return {"ok": False, "error": "Неверный формат пары.", "suggestions": ["BTC/USDT", "ETH/USDT"]}
+        return {"ok": True, "pair": f"{base}/{quote}"}
+
+    if text.endswith("usdt") and len(text) > 4:
+        base = text[:-4]
+        base = PAIR_ALIASES.get(base, base).upper()
+        return {"ok": True, "pair": f"{base}/USDT"}
+
+    alias = PAIR_ALIASES.get(text)
+    if alias:
+        return {"ok": True, "pair": f"{alias}/USDT"}
+
+    suggestions_pool = [
+        "BTC/USDT",
+        "ETH/USDT",
+        "LINK/USDT",
+        "APT/USDT",
+        "OP/USDT",
+        "ARB/USDT",
+        "BNB/USDT",
+        "SOL/USDT",
+    ]
+    close = difflib.get_close_matches(text.upper(), [x.split("/")[0] for x in suggestions_pool], n=3, cutoff=0.3)
+    suggestions = [f"{x}/USDT" for x in close] if close else suggestions_pool[:4]
+    return {"ok": False, "error": "Не понял тикер.", "suggestions": suggestions}
 
 
 def clean_ai_text(text: str) -> str:
@@ -135,6 +196,17 @@ def _fetch_binance_price(symbol: str, api_key: str = "") -> float:
     return float(payload.get("price"))
 
 
+def _fetch_binance_24h(symbol: str, api_key: str = "") -> dict:
+    params = urllib.parse.urlencode({"symbol": symbol})
+    url = f"https://api.binance.com/api/v3/ticker/24hr?{params}"
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("X-MBX-APIKEY", api_key)
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        payload = json.loads(resp.read().decode("utf-8"))
+    return payload
+
+
 def analyze_binance_pair(pair: str, api_key: str = "") -> str:
     raw = (pair or "").upper().replace(" ", "")
     symbol = raw.replace("/", "")
@@ -150,6 +222,7 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         closes_1h, vols_1h = _fetch_binance_klines(symbol, "1h", 200, api_key=api_key)
         closes_4h, _ = _fetch_binance_klines(symbol, "4h", 200, api_key=api_key)
         price = _fetch_binance_price(symbol, api_key=api_key)
+        ticker24 = _fetch_binance_24h(symbol, api_key=api_key)
     except Exception as e:
         return f"⚠️ Ошибка Binance API: {e}"
 
@@ -162,6 +235,8 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
 
     avg_vol = statistics.mean(vols_1h[-20:]) if len(vols_1h) >= 20 else max(vols_1h[-1], 1)
     vol_ratio = vols_1h[-1] / avg_vol if avg_vol else 1.0
+    vol_pct_vs_avg = (vol_ratio - 1) * 100
+    price_change_24h = float(ticker24.get("priceChangePercent", 0.0))
     bb_pos = 0.5 if bb_u == bb_l else (price - bb_l) / (bb_u - bb_l)
     bb_pos = max(0.0, min(1.0, bb_pos))
 
@@ -209,7 +284,8 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         "Технический анализ:\n"
         f"• RSI {rsi_15:.2f} - {rsi_text}\n"
         f"• Цена {'выше' if above_ema_15 else 'ниже'} EMA(50) на 15м и {'выше' if above_ema_1h else 'ниже'} на 1ч\n"
-        f"• Объем {'ниже' if vol_ratio < 1 else 'выше'} среднего ({vol_ratio:.2f}x)\n"
+        f"• Изменение цены за 24ч: {price_change_24h:+.2f}%\n"
+        f"• Объем {'ниже' if vol_ratio < 1 else 'выше'} среднего ({vol_ratio:.2f}x, {vol_pct_vs_avg:+.1f}%)\n"
         f"• MACD {macd_text}\n"
         f"• Bollinger Bands: цена в {'верхней' if bb_pos >= 0.5 else 'нижней'} половине канала ({bb_pos:.2f})\n\n"
         "Ключевые уровни:\n"
