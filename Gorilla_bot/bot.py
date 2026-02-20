@@ -492,11 +492,12 @@ async def open_project_hub(message: types.Message):
         return
     await message.answer(
         "🚀 Создать проект\n\n"
-        "Здесь ты настраиваешь свой AI-автопостинг под ключ:\n"
-        "• любой канал и тема\n"
-        "• любое оформление и стиль\n"
-        "• гибкая частота и рандом\n"
-        "• глубокая настройка через ИИ без разработчика.",
+        "Что это даёт:\n"
+        "• подключаешь СВОЙ канал и настраиваешь его под себя\n"
+        "• выбираешь тему, стиль, формат, частоту и источники\n"
+        "• включаешь индивидуальный автопостинг (вплоть до рандома)\n"
+        "• ИИ ведёт твой канал: генерирует и публикует контент по правилам проекта\n\n"
+        "Нажми «✨ Запустить мастер проекта» и пройди пошаговую настройку.",
         reply_markup=project_hub_keyboard(),
     )
 
@@ -506,7 +507,7 @@ async def create_project(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
     await state.set_state(ProjectState.waiting_channel)
-    await message.answer("STEP 1: отправь @channel_username")
+    await message.answer("STEP 1/8: подключи свой канал — отправь @channel_username\n\nПример: @my_channel")
 
 
 @dp.message(ProjectState.waiting_channel)
