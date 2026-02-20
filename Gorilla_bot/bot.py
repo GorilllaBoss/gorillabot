@@ -864,6 +864,44 @@ async def project_step_7_time_mode(callback: types.CallbackQuery, state: FSMCont
 @dp.message(ProjectState.posting_time)
 async def project_step_7_time_value(message: types.Message, state: FSMContext):
     val = (message.text or "").strip()
+    data = await state.get_data()
+
+    edit_project_id = data.get("edit_project_id")
+    edit_time_mode = data.get("edit_time_mode", "fixed")
+
+    if edit_project_id:
+        try:
+            if edit_time_mode == "fixed":
+                datetime.strptime(val, "%H:%M")
+            else:
+                start, end = [x.strip() for x in val.split("-", 1)]
+                datetime.strptime(start, "%H:%M")
+                datetime.strptime(end, "%H:%M")
+        except Exception:
+            if edit_time_mode == "fixed":
+                await message.answer("⚠️ Неверный формат. Введи HH:MM (пример: 20:48)")
+            else:
+                await message.answer("⚠️ Неверный формат. Введи диапазон HH:MM-HH:MM (пример: 09:00-21:00)")
+            return
+
+        record = get_user_record(DATA_FILE, message.from_user.id)
+        projects = record.get("projects", [])
+        project = next((p for p in projects if p.get("id") == edit_project_id), None)
+        if not project:
+            await state.clear()
+            await message.answer("⚠️ Проект не найден", reply_markup=user_menu(message.from_user.id))
+            return
+
+        project["posting_time"] = val
+        project["updated_at"] = datetime.now().isoformat()
+        project.setdefault("frequency", {})["value"] = val
+        project.setdefault("scheduler_settings", {})["random_mode"] = edit_time_mode == "random"
+        set_user_record(DATA_FILE, message.from_user.id, record)
+
+        await state.clear()
+        await message.answer("✅ Расписание проекта обновлено")
+        return
+
     await state.update_data(posting_time=val, project_step=7)
     await state.set_state(ProjectState.sources)
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -1007,14 +1045,62 @@ async def project_dashboard_actions(callback: types.CallbackQuery):
         await callback.answer()
         return
 
+    if action == "schedule":
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="1 пост/день", callback_data=f"projdashfreq:{project_id}:1"), InlineKeyboardButton(text="3 поста/день", callback_data=f"projdashfreq:{project_id}:3")],
+                [InlineKeyboardButton(text="5 постов/день", callback_data=f"projdashfreq:{project_id}:5"), InlineKeyboardButton(text="Random", callback_data=f"projdashfreq:{project_id}:random")],
+                [InlineKeyboardButton(text="🕒 Фикс время", callback_data=f"projdashtime:{project_id}:fixed")],
+                [InlineKeyboardButton(text="🎲 Рандом диапазон", callback_data=f"projdashtime:{project_id}:random")],
+            ]
+        )
+        await callback.message.answer("📅 Настрой частоту и время публикаций:", reply_markup=kb)
+        await callback.answer()
+        return
+
     hints = {
         "theme": "✏️ Тема меняется через мастер: кнопка «Изменить».",
         "examples": "📝 Примеры постов добавляются на STEP 5.",
         "style": "🎨 Оформление меняется на STEP 9.",
-        "schedule": "📅 Частота и время меняются на STEP 6-7.",
         "sources": "📡 Источники меняются на STEP 8.",
     }
     await callback.message.answer(hints.get(action, "Функция в разработке"))
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("projdashfreq:"))
+async def project_dashboard_frequency(callback: types.CallbackQuery):
+    _, project_id, freq = callback.data.split(":", 2)
+    record = get_user_record(DATA_FILE, callback.from_user.id)
+    projects = record.get("projects", [])
+    project = next((p for p in projects if p.get("id") == project_id), None)
+    if not project:
+        await callback.answer("Проект не найден", show_alert=True)
+        return
+
+    project["posting_frequency"] = freq
+    project["updated_at"] = datetime.now().isoformat()
+    scheduler = project.setdefault("scheduler_settings", {})
+    if freq == "random":
+        scheduler["daily_posts"] = 3
+        scheduler["random_mode"] = True
+    else:
+        scheduler["daily_posts"] = int(freq)
+        scheduler["random_mode"] = False
+    set_user_record(DATA_FILE, callback.from_user.id, record)
+    await callback.message.answer(f"✅ Частота обновлена: {freq}")
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("projdashtime:"))
+async def project_dashboard_time_mode(callback: types.CallbackQuery, state: FSMContext):
+    _, project_id, mode = callback.data.split(":", 2)
+    await state.set_state(ProjectState.posting_time)
+    await state.update_data(edit_project_id=project_id, edit_time_mode=mode)
+    if mode == "fixed":
+        await callback.message.answer("Введи время в формате HH:MM (например 20:48)")
+    else:
+        await callback.message.answer("Введи диапазон в формате HH:MM-HH:MM (например 09:00-21:00)")
     await callback.answer()
 
 
