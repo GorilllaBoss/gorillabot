@@ -5,14 +5,14 @@ BTN_ACCESS = "🔐 Премиум услуги"
 BTN_AUTOPOST = "📣 Автопостинг"
 BTN_CRYPTO = "📈 Крипто анализ"
 BTN_ESOTERIC = "🪄 Глубокая эзотерика"
-BTN_AI_HELP = "🧠 Помощь ИИ агент"
+BTN_PSYCHOLOGY = "🧠 Психолог"
 BTN_NAVIGATOR = "🧭 Тебе точно сюда"
 BTN_MY = "🗂 Мои каналы"
 BTN_GROUP = "🛡 Группы и права"
 BTN_BACK = "⬅️ Назад"
 BTN_PROJECTS = "📁 Мои проекты"
 BTN_CREATE_PROJECT = "🚀 Создать проект"
-BTN_PROJECT_WIZARD = "✨ Запустить мастер проекта"
+BTN_PROJECT_WIZARD = "✨ Начать"
 BTN_ACCOUNT = "⚙️ Аккаунт"
 
 BTN_ADD_CHANNEL = "➕ Добавить канал"
@@ -34,7 +34,7 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=BTN_AI)],
-            [KeyboardButton(text=BTN_NAVIGATOR), KeyboardButton(text=BTN_AI_HELP)],
+            [KeyboardButton(text=BTN_NAVIGATOR), KeyboardButton(text=BTN_PSYCHOLOGY)],
             [KeyboardButton(text=BTN_ESOTERIC), KeyboardButton(text=BTN_CRYPTO)],
             [KeyboardButton(text=BTN_CREATE_PROJECT)],
         ],

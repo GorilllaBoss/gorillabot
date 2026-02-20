@@ -13,14 +13,14 @@ from openai import OpenAI
 from personal_bot.config import ACCESS_CODE, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
 from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
 from personal_bot.services import ask_llm, fetch_crypto_snapshot
-from personal_bot.states import AccessCodeState, AiHelpState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState
+from personal_bot.states import AccessCodeState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState, PsychologyState
 from personal_bot.storage import default_group_permissions, default_life_profile, default_project, get_user_record, load_users, save_users, set_user_record, user_has_premium
 from personal_bot.ui import (
     BTN_ACCESS,
     BTN_ACCOUNT,
     BTN_ADD_CHANNEL,
     BTN_AI,
-    BTN_AI_HELP,
+    BTN_PSYCHOLOGY,
     BTN_AUTOPOST,
     BTN_BACK,
     BTN_CREATE_PROJECT,
@@ -93,6 +93,42 @@ ESOTERIC_MENU = {
 
 def user_menu(user_id: int):
     return main_menu(user_has_premium(DATA_FILE, user_id))
+
+
+def current_module_from_text(text: str) -> str:
+    mapping = {
+        BTN_AI: "assistant",
+        BTN_ACCESS: "access",
+        BTN_PSYCHOLOGY: "psychology",
+        BTN_NAVIGATOR: "navigator",
+        BTN_ESOTERIC: "esoteric",
+        BTN_CRYPTO: "crypto",
+        BTN_CREATE_PROJECT: "project_hub",
+        BTN_PROJECT_WIZARD: "project_wizard",
+        BTN_PROJECTS: "project_list",
+        BTN_AUTOPOST: "autopost",
+        BTN_MY: "channels",
+        BTN_GROUP: "groups",
+        BTN_ACCOUNT: "account",
+    }
+    return mapping.get(text, "unknown")
+
+
+async def persist_flow_snapshot(message: types.Message, state: FSMContext, target_module: str):
+    current_state = await state.get_state()
+    if not current_state:
+        return
+    payload = await state.get_data()
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    memory = record.get("flow_memory", {})
+    memory[current_state] = {
+        "state": current_state,
+        "data": payload,
+        "target_module": target_module,
+        "saved_at": datetime.now().isoformat(),
+    }
+    record["flow_memory"] = memory
+    set_user_record(DATA_FILE, message.from_user.id, record)
 
 
 def dashboard_kb() -> ReplyKeyboardMarkup:
@@ -171,7 +207,10 @@ async def ensure_premium(message: types.Message) -> bool:
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    await message.answer("🚀 GorillaAI. Выбери раздел.", reply_markup=user_menu(message.from_user.id))
+    if user_has_premium(DATA_FILE, message.from_user.id):
+        await message.answer("🚀 GorillaAI. Выбери раздел.", reply_markup=user_menu(message.from_user.id))
+    else:
+        await message.answer("🤖 GorillaAI Premium.\n\nТребуется код доступа.", reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(Command("menu"))
@@ -182,7 +221,7 @@ async def cmd_menu(message: types.Message):
 @dp.message(F.text.in_([
     BTN_AI,
     BTN_ACCESS,
-    BTN_AI_HELP,
+    BTN_PSYCHOLOGY,
     BTN_NAVIGATOR,
     BTN_ESOTERIC,
     BTN_CRYPTO,
@@ -195,16 +234,17 @@ async def cmd_menu(message: types.Message):
     BTN_ACCOUNT,
 ]))
 async def route_menu_buttons(message: types.Message, state: FSMContext):
+    text = message.text
+    await persist_flow_snapshot(message, state, current_module_from_text(text))
     if await state.get_state():
         await state.clear()
 
-    text = message.text
     if text == BTN_AI:
         await ask_ai(message, state)
     elif text == BTN_ACCESS:
         await cmd_access(message, state)
-    elif text == BTN_AI_HELP:
-        await ai_help_menu(message, state)
+    elif text == BTN_PSYCHOLOGY:
+        await psychology_menu(message, state)
     elif text == BTN_NAVIGATOR:
         await navigator_entry(message, state)
     elif text == BTN_ESOTERIC:
@@ -212,9 +252,9 @@ async def route_menu_buttons(message: types.Message, state: FSMContext):
     elif text == BTN_CRYPTO:
         await crypto_menu(message, state)
     elif text == BTN_CREATE_PROJECT:
-        await open_project_hub(message)
+        await open_project_hub(message, state)
     elif text == BTN_PROJECT_WIZARD:
-        await create_project(message, state)
+        await start_project_wizard(message, state)
     elif text == BTN_PROJECTS:
         await my_projects(message)
     elif text == BTN_AUTOPOST:
@@ -274,38 +314,38 @@ async def ask_ai_state(message: types.Message, state: FSMContext):
     await ask_ai(message, state)
 
 
-@dp.message(F.text == BTN_AI_HELP)
-async def ai_help_menu(message: types.Message, state: FSMContext):
+@dp.message(F.text == BTN_PSYCHOLOGY)
+async def psychology_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
-    await state.set_state(AiHelpState.waiting_mode)
+    await state.set_state(PsychologyState.waiting_mode)
     kb = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="🧠 Помощь ИИ агент", callback_data="help:ai")],
+            [InlineKeyboardButton(text="🧠 Психолог ИИ", callback_data="help:ai")],
             [InlineKeyboardButton(text="📞 Психолог онлайн", callback_data="help:online")],
         ]
     )
-    await message.answer("Выбери формат помощи", reply_markup=kb)
+    await message.answer("Выбери формат психологической помощи", reply_markup=kb)
 
 
 @dp.callback_query(F.data.startswith("help:"))
-async def ai_help_mode(callback: types.CallbackQuery, state: FSMContext):
+async def psychology_mode(callback: types.CallbackQuery, state: FSMContext):
     mode = callback.data.split(":", 1)[1]
     if mode == "online":
         await state.clear()
         await callback.message.answer("Психолог онлайн: @aggressive_chik")
     else:
-        await state.set_state(AiHelpState.waiting_question)
+        await state.set_state(PsychologyState.waiting_question)
         await callback.message.answer("Опиши ситуацию")
     await callback.answer()
 
 
-@dp.message(AiHelpState.waiting_question)
-async def ai_help_run(message: types.Message):
+@dp.message(PsychologyState.waiting_question)
+async def psychology_ai_run(message: types.Message):
     answer = await run_llm_with_status(
         message,
         status_for("assistant"),
-        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты ИИ-агент помощи: умный, живой, поддерживающий, немного дерзкий.", (message.text or ""), max_tokens=700),
+        lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты ИИ-психолог: поддерживающий, бережный и практичный. Дай 3 понятных шага.", (message.text or ""), max_tokens=700),
     )
     await message.answer(f"🧠 {answer}")
 
@@ -531,112 +571,364 @@ async def my_projects(message: types.Message):
     if not projects:
         await message.answer("Проектов пока нет")
         return
-    await message.answer("\n".join([f"• {p.get('topic')} | {p.get('channel')} | {'ON' if p.get('enabled') else 'OFF'}" for p in projects]))
+    lines = ["📁 Твои проекты:"]
+    for p in projects:
+        lines.append(
+            f"• {p.get('channel_username') or p.get('channel')} | {p.get('theme') or p.get('topic')} | "
+            f"{p.get('posting_frequency', '1 пост/день')} | {'ON' if p.get('is_autopost_enabled') else 'OFF'}"
+        )
+    await message.answer("\n".join(lines))
 
 
 @dp.message(F.text == BTN_CREATE_PROJECT)
-async def open_project_hub(message: types.Message):
+async def open_project_hub(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
+    await state.set_state(ProjectState.intro)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✨ Начать", callback_data="proj:start")]])
     await message.answer(
-        "🚀 Создать проект\n\n"
-        "Что это даёт:\n"
-        "• подключаешь СВОЙ канал и настраиваешь его под себя\n"
-        "• выбираешь тему, стиль, формат, частоту и источники\n"
-        "• включаешь индивидуальный автопостинг (вплоть до рандома)\n"
-        "• ИИ ведёт твой канал: генерирует и публикует контент по правилам проекта\n\n"
-        "Нажми «✨ Запустить мастер проекта» и пройди пошаговую настройку.",
-        reply_markup=project_hub_keyboard(),
+        "🚀 Создание проекта.\n\n"
+        "Я помогу подключить канал,\n"
+        "выбрать тему\n"
+        "и настроить автопостинг.\n\n"
+        "Это займёт пару минут 👍.",
+        reply_markup=kb,
     )
 
 
 @dp.message(F.text == BTN_PROJECT_WIZARD)
-async def create_project(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
+async def start_project_wizard(message: types.Message, state: FSMContext):
+    await state.set_state(ProjectState.channel_ready)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Канал готов", callback_data="proj:channel_ready")]])
+    await message.answer(
+        "STEP 1 — Создание канала\n\n"
+        "Создай Telegram канал:\n"
+        "Telegram → Новый канал → Название → Готово.\n\n"
+        "Если канал уже есть — отлично.",
+        reply_markup=kb,
+    )
+
+
+@dp.callback_query(F.data == "proj:start")
+async def project_step_1_intro(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(ProjectState.channel_ready)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="✅ Канал готов", callback_data="proj:channel_ready")]])
+    await callback.message.answer(
+        "STEP 1 — Создание канала\n\n"
+        "Создай Telegram канал:\n"
+        "Telegram → Новый канал → Название → Готово.\n\n"
+        "Если канал уже есть — отлично.",
+        reply_markup=kb,
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "proj:channel_ready")
+async def project_step_2_username_prompt(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(ProjectState.username)
+    await callback.message.answer(
+        "STEP 2 — Username\n\n"
+        "Нужен username канала. Это ссылка после @\n"
+        "Примеры: @crypto_news, @my_ai_blog\n\n"
+        "Где найти: канал → информация → публичная ссылка.\n"
+        "Отправь username:",
+    )
+    await callback.answer()
+
+
+@dp.message(ProjectState.username)
+async def project_step_2_username(message: types.Message, state: FSMContext):
+    username = (message.text or "").strip()
+    if not username.startswith("@"):
+        await message.answer("⚠️ Username должен начинаться с @. Пример: @my_ai_blog")
         return
-    await state.set_state(ProjectState.waiting_channel)
-    await message.answer("STEP 1/8: подключи свой канал — отправь @channel_username\n\nПример: @my_channel")
+    await state.update_data(channel_username=username, project_step=2)
+    await state.set_state(ProjectState.access_check)
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔎 Проверить доступ", callback_data="proj:check_access")]])
+    await message.answer(
+        "STEP 3 — Доступ бота\n\n"
+        "Добавь бота в админы канала и включи:\n"
+        "✅ публиковать\n✅ редактировать",
+        reply_markup=kb,
+    )
 
 
-@dp.message(ProjectState.waiting_channel)
-async def p_channel(message: types.Message, state: FSMContext):
-    channel = (message.text or "").strip()
-    if not channel.startswith("@"):
-        await message.answer("Нужен @channel")
-        return
-    await state.update_data(channel=channel)
-    await state.set_state(ProjectState.waiting_topic)
-    await message.answer("STEP 2: тема проекта")
-
-
-@dp.message(ProjectState.waiting_topic)
-async def p_topic(message: types.Message, state: FSMContext):
-    await state.update_data(topic=(message.text or "").strip())
-    await state.set_state(ProjectState.waiting_style)
-    await message.answer("STEP 3: стиль (expert/analytical/hype/funny/news)")
-
-
-@dp.message(ProjectState.waiting_style)
-async def p_style(message: types.Message, state: FSMContext):
-    await state.update_data(style=(message.text or "").strip())
-    await state.set_state(ProjectState.waiting_formatting)
-    await message.answer("STEP 4: формат yes/no,yes/no,yes/no,signature")
-
-
-@dp.message(ProjectState.waiting_formatting)
-async def p_format(message: types.Message, state: FSMContext):
-    parts = [x.strip() for x in (message.text or "").split(",")]
-    if len(parts) < 4:
-        await message.answer("Формат: yes/no,yes/no,yes/no,signature")
-        return
-    await state.update_data(formatting={"emojis": parts[0] == "yes", "cta": parts[1] == "yes", "hashtags": parts[2] == "yes", "signature": parts[3]})
-    await state.set_state(ProjectState.waiting_frequency)
-    await message.answer("STEP 5: частота interval:6 / daily / times:09:00|18:00")
-
-
-@dp.message(ProjectState.waiting_frequency)
-async def p_frequency(message: types.Message, state: FSMContext):
-    raw = (message.text or "").strip().lower()
-    frequency = {"mode": "interval", "value": 6}
-    if raw.startswith("interval:"):
-        frequency = {"mode": "interval", "value": max(1, int(raw.split(":", 1)[1]))}
-    elif raw == "daily":
-        frequency = {"mode": "daily", "value": "09:00"}
-    elif raw.startswith("times:"):
-        frequency = {"mode": "times", "value": raw.split(":", 1)[1].split("|")}
-    await state.update_data(frequency=frequency)
-    await state.set_state(ProjectState.waiting_sources)
-    await message.answer("STEP 6: источники через запятую (gpt,rss,api,scrape)")
-
-
-@dp.message(ProjectState.waiting_sources)
-async def p_sources_and_confirm(message: types.Message, state: FSMContext):
+@dp.callback_query(F.data == "proj:check_access")
+async def project_step_3_check_access(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    if "project_previewed" not in data:
-        sources = [x.strip() for x in (message.text or "gpt").split(",") if x.strip()]
-        project = default_project()
-        project.update(data)
-        project["id"] = uuid.uuid4().hex[:8]
-        project["sources"] = sources
-        preview = await run_llm_with_status(
-            message,
-            status_for("assistant"),
-            lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Сгенерируй preview поста", str(project), max_tokens=350),
-        )
-        await state.update_data(project=project, project_previewed=True)
-        await message.answer(f"STEP 7 Preview:\n{preview}\n\nSTEP 8: отправь start для запуска")
+    username = data.get("channel_username", "")
+    if not username:
+        await callback.message.answer("Сначала укажи username канала")
+        await callback.answer()
+        return
+    try:
+        chat = await bot.get_chat(username)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat.id, me.id)
+        if member.status not in {"administrator", "creator"}:
+            await callback.message.answer("❌ Бот не администратор канала.")
+            await callback.answer()
+            return
+        await state.update_data(channel_id=chat.id, project_step=3)
+    except Exception as e:
+        await callback.message.answer(f"❌ Ошибка проверки доступа: {e}")
+        await callback.answer()
         return
 
-    if (message.text or "").strip().lower() != "start":
-        await message.answer("Отправь start для запуска проекта")
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="AI", callback_data="proj:theme:AI"), InlineKeyboardButton(text="Крипто", callback_data="proj:theme:Крипто")],
+        [InlineKeyboardButton(text="Новости", callback_data="proj:theme:Новости"), InlineKeyboardButton(text="Бизнес", callback_data="proj:theme:Бизнес")],
+        [InlineKeyboardButton(text="Своя тема", callback_data="proj:theme:custom")],
+    ])
+    await state.set_state(ProjectState.theme_pick)
+    await callback.message.answer("STEP 4 — Выбери тему", reply_markup=kb)
+    await callback.answer("Доступ подтверждён")
+
+
+@dp.callback_query(F.data.startswith("proj:theme:"))
+async def project_step_4_theme(callback: types.CallbackQuery, state: FSMContext):
+    value = callback.data.split(":", 2)[2]
+    if value == "custom":
+        await state.set_state(ProjectState.custom_theme)
+        await callback.message.answer("Опиши свою тему (1-2 предложения)")
+        await callback.answer()
         return
-    project = data.get("project")
+    await state.update_data(theme=value, custom_theme="", project_step=4)
+    await project_examples_prompt(callback.message, state)
+    await callback.answer()
+
+
+@dp.message(ProjectState.custom_theme)
+async def project_step_4_custom_theme(message: types.Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if len(text) < 4:
+        await message.answer("Слишком коротко. Опиши тему подробнее.")
+        return
+    await state.update_data(theme="Своя тема", custom_theme=text, project_step=4)
+    await project_examples_prompt(message, state)
+
+
+async def project_examples_prompt(message: types.Message, state: FSMContext):
+    await state.set_state(ProjectState.examples)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Пропустить", callback_data="proj:examples_skip")],
+        [InlineKeyboardButton(text="Готово", callback_data="proj:examples_done")],
+    ])
+    await message.answer(
+        "STEP 5 — Свой стиль\n\n"
+        "Добавь 1–10 своих примеров постов.\n"
+        "Я обучусь твоему стилю.",
+        reply_markup=kb,
+    )
+
+
+@dp.message(ProjectState.examples)
+async def project_step_5_examples_collect(message: types.Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if not text:
+        return
+    data = await state.get_data()
+    examples = data.get("example_posts", [])
+    if len(examples) >= 10:
+        await message.answer("Уже сохранено 10 примеров. Нажми «Готово».")
+        return
+    examples.append(text)
+    await state.update_data(example_posts=examples, project_step=5)
+    await message.answer(f"✅ Пример сохранён ({len(examples)}/10)")
+
+
+@dp.callback_query(F.data.in_(["proj:examples_skip", "proj:examples_done"]))
+async def project_step_6_frequency_prompt(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(ProjectState.frequency)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="1 пост день", callback_data="proj:freq:1")],
+        [InlineKeyboardButton(text="3 поста день", callback_data="proj:freq:3")],
+        [InlineKeyboardButton(text="5 постов день", callback_data="proj:freq:5")],
+        [InlineKeyboardButton(text="Random", callback_data="proj:freq:random")],
+    ])
+    await callback.message.answer("STEP 6 — Выбери частоту", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("proj:freq:"))
+async def project_step_6_frequency(callback: types.CallbackQuery, state: FSMContext):
+    raw = callback.data.split(":", 2)[2]
+    await state.update_data(posting_frequency=raw, project_step=6)
+    await state.set_state(ProjectState.posting_time)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Фиксированное время", callback_data="proj:time:fixed")],
+        [InlineKeyboardButton(text="Рандом в диапазоне", callback_data="proj:time:random")],
+    ])
+    await callback.message.answer("STEP 7 — Время публикации", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("proj:time:"))
+async def project_step_7_time_mode(callback: types.CallbackQuery, state: FSMContext):
+    mode = callback.data.split(":", 2)[2]
+    await state.update_data(posting_time_mode=mode)
+    if mode == "fixed":
+        await callback.message.answer("Введи время в формате HH:MM (например 09:30)")
+    else:
+        await callback.message.answer("Введи диапазон в формате start-end (например 09:00-21:00)")
+    await callback.answer()
+
+
+@dp.message(ProjectState.posting_time)
+async def project_step_7_time_value(message: types.Message, state: FSMContext):
+    val = (message.text or "").strip()
+    await state.update_data(posting_time=val, project_step=7)
+    await state.set_state(ProjectState.sources)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="AI генерация", callback_data="proj:src:ai")],
+        [InlineKeyboardButton(text="RSS", callback_data="proj:src:rss")],
+        [InlineKeyboardButton(text="Telegram каналы", callback_data="proj:src:tg")],
+    ])
+    await message.answer("STEP 8 — Источники", reply_markup=kb)
+
+
+@dp.callback_query(F.data.startswith("proj:src:"))
+async def project_step_8_sources(callback: types.CallbackQuery, state: FSMContext):
+    source = callback.data.split(":", 2)[2]
+    mapping = {"ai": ["AI генерация"], "rss": ["RSS"], "tg": ["Telegram каналы"]}
+    await state.update_data(content_sources=mapping.get(source, ["AI генерация"]), project_step=8)
+    await state.set_state(ProjectState.format_style)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="короткие посты", callback_data="proj:style:short")],
+        [InlineKeyboardButton(text="аналитика", callback_data="proj:style:analysis")],
+        [InlineKeyboardButton(text="с эмодзи", callback_data="proj:style:emoji")],
+        [InlineKeyboardButton(text="строго деловой", callback_data="proj:style:strict")],
+    ])
+    await callback.message.answer("STEP 9 — Оформление", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("proj:style:"))
+async def project_step_9_style(callback: types.CallbackQuery, state: FSMContext):
+    style = callback.data.split(":", 2)[2]
+    readable = {
+        "short": "короткие посты",
+        "analysis": "аналитика",
+        "emoji": "с эмодзи",
+        "strict": "строго деловой",
+    }.get(style, "короткие посты")
+    await state.update_data(post_style=readable, project_step=9)
+    data = await state.get_data()
+    await state.set_state(ProjectState.summary)
+    summary = (
+        "STEP 10 — Summary\n\n"
+        f"Канал: {data.get('channel_username', '—')}\n"
+        f"Тема: {data.get('theme', '—')} {data.get('custom_theme', '')}\n"
+        f"Частота: {data.get('posting_frequency', '1')}\n"
+        f"Источники: {', '.join(data.get('content_sources', ['AI генерация']))}"
+    )
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Запустить проект", callback_data="proj:launch")],
+        [InlineKeyboardButton(text="✏️ Изменить", callback_data="proj:edit")],
+    ])
+    await callback.message.answer(summary, reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "proj:edit")
+async def project_edit(callback: types.CallbackQuery, state: FSMContext):
+    await state.set_state(ProjectState.theme_pick)
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="AI", callback_data="proj:theme:AI"), InlineKeyboardButton(text="Крипто", callback_data="proj:theme:Крипто")],
+        [InlineKeyboardButton(text="Новости", callback_data="proj:theme:Новости"), InlineKeyboardButton(text="Бизнес", callback_data="proj:theme:Бизнес")],
+        [InlineKeyboardButton(text="Своя тема", callback_data="proj:theme:custom")],
+    ])
+    await callback.message.answer("Измени тему и пройди шаги заново", reply_markup=kb)
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "proj:launch")
+async def project_launch(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    project = default_project()
+    project["id"] = uuid.uuid4().hex[:8]
+    project["project_id"] = project["id"]
+    project["user_id"] = callback.from_user.id
+    project["channel_username"] = data.get("channel_username", "")
+    project["channel"] = project["channel_username"]
+    project["channel_id"] = data.get("channel_id", "")
+    project["theme"] = data.get("theme", "AI")
+    project["custom_theme"] = data.get("custom_theme", "")
+    project["topic"] = project["custom_theme"] or project["theme"]
+    project["post_style"] = data.get("post_style", "короткие посты")
+    project["style"] = project["post_style"]
+    project["posting_frequency"] = data.get("posting_frequency", "1")
+    project["posting_time"] = data.get("posting_time", "09:00")
+    project["content_sources"] = data.get("content_sources", ["AI генерация"])
+    project["sources"] = [x.lower() for x in project["content_sources"]]
+    project["is_autopost_enabled"] = True
     project["enabled"] = True
-    record = get_user_record(DATA_FILE, message.from_user.id)
+    project["example_posts"] = data.get("example_posts", [])
+    daily_posts = 1
+    freq = str(project["posting_frequency"])
+    if freq.isdigit():
+        daily_posts = int(freq)
+    if freq == "random":
+        daily_posts = 3
+        project["scheduler_settings"]["random_mode"] = True
+    project["scheduler_settings"]["daily_posts"] = daily_posts
+    project["frequency"] = {"mode": "daily", "value": project["posting_time"]}
+    project["updated_at"] = datetime.now().isoformat()
+
+    record = get_user_record(DATA_FILE, callback.from_user.id)
     record.setdefault("projects", []).append(project)
-    set_user_record(DATA_FILE, message.from_user.id, record)
+    set_user_record(DATA_FILE, callback.from_user.id, record)
     await state.clear()
-    await message.answer("✅ Проект автопостинга запущен", reply_markup=user_menu(message.from_user.id))
+
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✏️ Редактировать тему", callback_data=f"projdash:theme:{project['id']}")],
+        [InlineKeyboardButton(text="📝 Примеры постов", callback_data=f"projdash:examples:{project['id']}")],
+        [InlineKeyboardButton(text="⏰ Автопостинг", callback_data=f"projdash:auto:{project['id']}")],
+        [InlineKeyboardButton(text="🎨 Оформление", callback_data=f"projdash:style:{project['id']}")],
+        [InlineKeyboardButton(text="📅 Расписание", callback_data=f"projdash:schedule:{project['id']}")],
+        [InlineKeyboardButton(text="📡 Источники", callback_data=f"projdash:sources:{project['id']}")],
+        [InlineKeyboardButton(text="➕ Добавить канал", callback_data="proj:start")],
+        [InlineKeyboardButton(text="❌ Удалить", callback_data=f"projdash:delete:{project['id']}")],
+    ])
+    await callback.message.answer(f"📊 Проект: {project['channel_username']} создан", reply_markup=kb)
+    await callback.answer("Проект запущен")
+
+
+@dp.callback_query(F.data.startswith("projdash:"))
+async def project_dashboard_actions(callback: types.CallbackQuery):
+    parts = callback.data.split(":")
+    action = parts[1]
+    project_id = parts[2] if len(parts) > 2 else ""
+    record = get_user_record(DATA_FILE, callback.from_user.id)
+    projects = record.get("projects", [])
+    project = next((p for p in projects if p.get("id") == project_id), None)
+    if action == "delete" and project:
+        record["projects"] = [p for p in projects if p.get("id") != project_id]
+        set_user_record(DATA_FILE, callback.from_user.id, record)
+        await callback.message.answer("❌ Проект удалён")
+        await callback.answer()
+        return
+    if not project:
+        await callback.answer("Проект не найден", show_alert=True)
+        return
+
+    if action == "auto":
+        project["is_autopost_enabled"] = not project.get("is_autopost_enabled", True)
+        project["enabled"] = project["is_autopost_enabled"]
+        set_user_record(DATA_FILE, callback.from_user.id, record)
+        await callback.message.answer(f"⏰ Автопостинг: {'ON' if project['is_autopost_enabled'] else 'OFF'}")
+        await callback.answer()
+        return
+
+    hints = {
+        "theme": "✏️ Тема меняется через мастер: кнопка «Изменить».",
+        "examples": "📝 Примеры постов добавляются на STEP 5.",
+        "style": "🎨 Оформление меняется на STEP 9.",
+        "schedule": "📅 Частота и время меняются на STEP 6-7.",
+        "sources": "📡 Источники меняются на STEP 8.",
+    }
+    await callback.message.answer(hints.get(action, "Функция в разработке"))
+    await callback.answer()
 
 
 @dp.message(F.text == BTN_AUTOPOST)
