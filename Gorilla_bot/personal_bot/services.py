@@ -111,25 +111,31 @@ def _macd(values: list[float]) -> tuple[float, float, float]:
     return macd_line[-1], signal[-1], macd_line[-1] - signal[-1]
 
 
-def _fetch_binance_klines(symbol: str, interval: str, limit: int = 200) -> tuple[list[float], list[float]]:
+def _fetch_binance_klines(symbol: str, interval: str, limit: int = 200, api_key: str = "") -> tuple[list[float], list[float]]:
     params = urllib.parse.urlencode({"symbol": symbol, "interval": interval, "limit": str(limit)})
     url = f"https://api.binance.com/api/v3/klines?{params}"
-    with urllib.request.urlopen(url, timeout=20) as resp:
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("X-MBX-APIKEY", api_key)
+    with urllib.request.urlopen(req, timeout=20) as resp:
         rows = json.loads(resp.read().decode("utf-8"))
     closes = [float(r[4]) for r in rows]
     volumes = [float(r[5]) for r in rows]
     return closes, volumes
 
 
-def _fetch_binance_price(symbol: str) -> float:
+def _fetch_binance_price(symbol: str, api_key: str = "") -> float:
     params = urllib.parse.urlencode({"symbol": symbol})
     url = f"https://api.binance.com/api/v3/ticker/price?{params}"
-    with urllib.request.urlopen(url, timeout=20) as resp:
+    req = urllib.request.Request(url)
+    if api_key:
+        req.add_header("X-MBX-APIKEY", api_key)
+    with urllib.request.urlopen(req, timeout=20) as resp:
         payload = json.loads(resp.read().decode("utf-8"))
     return float(payload.get("price"))
 
 
-def analyze_binance_pair(pair: str) -> str:
+def analyze_binance_pair(pair: str, api_key: str = "") -> str:
     raw = (pair or "").upper().replace(" ", "")
     symbol = raw.replace("/", "")
     if "/" not in raw and raw.endswith("USDT"):
@@ -140,10 +146,10 @@ def analyze_binance_pair(pair: str) -> str:
         return "⚠️ Формат пары: BTC/USDT или ETH/USDT"
 
     try:
-        closes_15, vols_15 = _fetch_binance_klines(symbol, "15m", 200)
-        closes_1h, vols_1h = _fetch_binance_klines(symbol, "1h", 200)
-        closes_4h, _ = _fetch_binance_klines(symbol, "4h", 200)
-        price = _fetch_binance_price(symbol)
+        closes_15, vols_15 = _fetch_binance_klines(symbol, "15m", 200, api_key=api_key)
+        closes_1h, vols_1h = _fetch_binance_klines(symbol, "1h", 200, api_key=api_key)
+        closes_4h, _ = _fetch_binance_klines(symbol, "4h", 200, api_key=api_key)
+        price = _fetch_binance_price(symbol, api_key=api_key)
     except Exception as e:
         return f"⚠️ Ошибка Binance API: {e}"
 

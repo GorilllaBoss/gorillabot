@@ -10,7 +10,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, ReplyKeyboardMarkup
 from openai import OpenAI
 
-from personal_bot.config import ACCESS_CODE, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
+from personal_bot.config import ACCESS_CODE, BINANCE_API_KEY, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
 from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
 from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot
 from personal_bot.states import AccessCodeState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState, PsychologyState
@@ -636,7 +636,7 @@ async def crypto_run(message: types.Message, state: FSMContext):
         await message.answer("Нужен формат пары, пример: BTC/USDT")
         return
 
-    report = await asyncio.to_thread(analyze_binance_pair, pair)
+    report = await asyncio.to_thread(analyze_binance_pair, pair, BINANCE_API_KEY)
     await state.clear()
     await message.answer(report, reply_markup=user_menu(message.from_user.id))
 

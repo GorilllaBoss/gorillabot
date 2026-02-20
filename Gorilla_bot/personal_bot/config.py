@@ -31,6 +31,8 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "").strip()
 ACCESS_CODE = os.getenv("BOT_ACCESS_CODE", "0000").strip()
 OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o-mini").strip()
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "").strip()
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "").strip()
 
 DATA_FILE = "data/personal_bot_users.json"
 os.makedirs("data", exist_ok=True)

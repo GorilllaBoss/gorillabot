@@ -55,6 +55,8 @@ BOT_TOKEN=1234567890:YOUR_TELEGRAM_BOT_TOKEN
 OPENROUTER_API_KEY=sk-or-v1-your-openrouter-api-key
 BOT_ACCESS_CODE=MyStrongPrivateCode2026
 OPENROUTER_MODEL=openai/gpt-4o-mini
+BINANCE_API_KEY=optional-binance-api-key
+BINANCE_API_SECRET=optional-binance-api-secret
 ```
 
 
@@ -203,3 +205,9 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 - Добавлен SaaS-мастер `🚀 Создать проект` (8 шагов) и `📁 Мои проекты`.
 - Эзотерика переведена в отдельные кнопки по каждому из 24 направлений с глубоким входным форматом.
 - Добавлены `docs/schema.sql` и `docs/saas_architecture.md` для PostgreSQL-архитектуры.
+
+
+### Binance API в этом проекте
+
+- Для текущего крипто-анализа ключи **не обязательны** (используются публичные Binance endpoints).
+- Если хочешь, можно добавить `BINANCE_API_KEY` и `BINANCE_API_SECRET` в `.env` — бот уже читает эти переменные.
