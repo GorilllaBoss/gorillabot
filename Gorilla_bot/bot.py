@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from personal_bot.config import ACCESS_CODE, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
 from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
-from personal_bot.services import ask_llm, fetch_crypto_snapshot
+from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot
 from personal_bot.states import AccessCodeState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState, PsychologyState
 from personal_bot.storage import default_group_permissions, default_life_profile, default_project, get_user_record, load_users, save_users, set_user_record, user_has_premium
 from personal_bot.ui import (
@@ -64,31 +64,112 @@ TOPIC_QUESTIONS = {
 }
 
 ESOTERIC_MENU = {
-    "🃏 Таро": "Введи: ситуация + вопрос + горизонт (дни/недели)",
-    "🔮 Оракулы": "Введи: запрос + что хочешь получить на выходе",
-    "ᚱ Руны": "Введи: контекст + цель на 30 дней",
-    "☯️ И-цзин": "Введи: ситуация / выбор А / выбор Б",
-    "☕ Интуитивные методы": "Введи: эмоция дня + главный вопрос",
-    "⭐ Западная астрология": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
-    "🪐 Джйотиш": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
-    "🐉 Китайская астрология": "Введи: ДД.ММ.ГГГГ Пол + вопрос",
-    "🌙 Лунная астрология": "Введи: дата + цель месяца + вопрос",
-    "🔢 Пифагор": "Введи: ДД.ММ.ГГГГ",
-    "🧾 Каббалистическая": "Введи: ФИО + ДД.ММ.ГГГГ",
-    "🧩 Матрица судьбы": "Введи: ДД.ММ.ГГГГ + ключевой вопрос",
-    "🧠 Human Design": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
-    "🧠 Соционика": "Введи: 3 типичных сценария общения",
-    "🧠 MBTI": "Введи: как принимаешь решения + что заряжает",
-    "🧠 Эннеаграмма": "Введи: мотивация + главный страх",
-    "🌀 Чакры": "Введи: самочувствие + эмоции + запрос",
-    "✨ Рейки": "Введи: энергия (1-10) + стресс + цель",
-    "🧿 Карма": "Введи: повторяющийся сценарий + желаемый сдвиг",
-    "✋ Хиромантия": "Введи: описание ладони + вопрос",
-    "🙂 Физиогномика": "Введи: черты лица + вопрос",
-    "🏡 Фэншуй": "Введи: тип пространства + проблема + цель",
-    "📆 Ба-цзы": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Пол",
-    "🥋 Цигун": "Введи: уровень подготовки + цель + ограничения",
+    "🃏 Таро": {
+        "description": "Архетипический разбор ситуации через символы карт и практический вектор действий.",
+        "input": "Введи: ситуация + вопрос + горизонт (дни/недели)",
+    },
+    "🔮 Оракулы": {
+        "description": "Мягкая интуитивная трактовка для текущего запроса и выбора следующего шага.",
+        "input": "Введи: запрос + что хочешь получить на выходе",
+    },
+    "ᚱ Руны": {
+        "description": "Символьный разбор конфликта/цели через рунические смыслы и рекомендации.",
+        "input": "Введи: контекст + цель на 30 дней",
+    },
+    "☯️ И-цзин": {
+        "description": "Стратегический анализ через логику перемен и сценарий выбора А/Б.",
+        "input": "Введи: ситуация / выбор А / выбор Б",
+    },
+    "☕ Интуитивные методы": {
+        "description": "Разбор эмоционального фона и скрытых сигналов для принятия решения.",
+        "input": "Введи: эмоция дня + главный вопрос",
+    },
+    "⭐ Классическая астрология": {
+        "description": "Базовый разбор натальных акцентов: характер, сильные стороны, риски.",
+        "input": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    },
+    "🌞 Классическая западная астрология": {
+        "description": "Подробный разбор транзитов, совместимости и текущего периода.",
+        "input": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    },
+    "🪐 Джйотиш": {
+        "description": "Ведический взгляд на кармические уроки, периоды и практичные решения.",
+        "input": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    },
+    "🐉 Китайская астрология": {
+        "description": "Разбор по знаку/элементу и циклам для карьеры, денег и отношений.",
+        "input": "Введи: ДД.ММ.ГГГГ Пол + вопрос",
+    },
+    "🌙 Лунная астрология": {
+        "description": "Анализ лунного ритма для режима, эмоций и тайминга решений.",
+        "input": "Введи: дата + цель месяца + вопрос",
+    },
+    "🔢 Классическая нумерология": {
+        "description": "Число пути, таланты и уязвимости в классической школе нумерологии.",
+        "input": "Введи: ДД.ММ.ГГГГ",
+    },
+    "🔢 Пифагор": {
+        "description": "Квадрат Пифагора: характер, энергия, дисциплина, интеллект, призвание.",
+        "input": "Введи: ДД.ММ.ГГГГ",
+    },
+    "🧾 Каббалистическая": {
+        "description": "Числовые и буквенные коды имени/даты для глубинных паттернов.",
+        "input": "Введи: ФИО + ДД.ММ.ГГГГ",
+    },
+    "🧩 Матрица судьбы": {
+        "description": "Разбор архетипов 22 арканов: ресурсы, блоки, вектор роста.",
+        "input": "Введи: ДД.ММ.ГГГГ + ключевой вопрос",
+    },
+    "🧠 Human Design": {
+        "description": "Тип, стратегия и авторитет для верных решений и меньшего стресса.",
+        "input": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Город",
+    },
+    "🧠 Соционика": {
+        "description": "Коммуникационный профиль, сильные роли и зоны конфликтов.",
+        "input": "Введи: 3 типичных сценария общения",
+    },
+    "🧠 MBTI": {
+        "description": "Когнитивный профиль и практичные рекомендации по работе/общению.",
+        "input": "Введи: как принимаешь решения + что заряжает",
+    },
+    "🧠 Эннеаграмма": {
+        "description": "Базовые мотивации и защитные стратегии, которые мешают росту.",
+        "input": "Введи: мотивация + главный страх",
+    },
+    "🌀 Чакры": {
+        "description": "Оценка баланса энергии и мягкий план восстановления ресурса.",
+        "input": "Введи: самочувствие + эмоции + запрос",
+    },
+    "✨ Рейки": {
+        "description": "Рекомендации по энергетической гигиене и восстановлению через практики.",
+        "input": "Введи: энергия (1-10) + стресс + цель",
+    },
+    "🧿 Карма": {
+        "description": "Повторяющиеся жизненные сценарии и как выйти из цикла.",
+        "input": "Введи: повторяющийся сценарий + желаемый сдвиг",
+    },
+    "✋ Хиромантия": {
+        "description": "Символьная трактовка линий ладони и характера решений.",
+        "input": "Введи: описание ладони + вопрос",
+    },
+    "🙂 Физиогномика": {
+        "description": "Этичный разбор поведенческих склонностей по описанию черт лица.",
+        "input": "Введи: черты лица + вопрос",
+    },
+    "🏡 Фэншуй": {
+        "description": "Практичные изменения пространства для фокуса, денег и спокойствия.",
+        "input": "Введи: тип пространства + проблема + цель",
+    },
+    "📆 Ба-цзы": {
+        "description": "Карта элементов, циклы удачи и выбор оптимальной стратегии.",
+        "input": "Введи: ДД.ММ.ГГГГ ЧЧ:ММ Пол",
+    },
+    "🥋 Цигун": {
+        "description": "Подбор безопасных практик для энергии, концентрации и восстановления.",
+        "input": "Введи: уровень подготовки + цель + ограничения",
+    },
 }
+
 
 
 def user_menu(user_id: int):
@@ -519,7 +600,8 @@ async def esoteric_pick(callback: types.CallbackQuery, state: FSMContext):
     name = names[idx]
     await state.set_state(EsotericState.waiting_payload)
     await state.update_data(esoteric_name=name)
-    await callback.message.answer(f"{name}\n{ESOTERIC_MENU[name]}")
+    cfg = ESOTERIC_MENU[name]
+    await callback.message.answer(f"{name}\n\n🧭 {cfg['description']}\n\n📌 Что отправить:\n{cfg['input']}")
     await callback.answer()
 
 
@@ -529,7 +611,7 @@ async def esoteric_run(message: types.Message, state: FSMContext):
     name = data.get("esoteric_name")
     payload = (message.text or "").strip()
     if not payload or len(payload) < 8:
-        await message.answer("Добавь больше данных по формату")
+        await message.answer(f"Добавь больше данных по формату:\n{ESOTERIC_MENU.get(name, {}).get('input', 'Опиши запрос подробнее')}")
         return
     answer = await run_llm_with_status(
         message,
@@ -544,23 +626,19 @@ async def crypto_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
     await state.set_state(CryptoState.waiting_coin)
-    await message.answer("Введи coin id (bitcoin, ethereum, solana)", reply_markup=back_menu())
+    await message.answer("Введи торговую пару Binance (например BTC/USDT, ETH/USDT)", reply_markup=back_menu())
 
 
 @dp.message(CryptoState.waiting_coin)
 async def crypto_run(message: types.Message, state: FSMContext):
-    coin = (message.text or "").strip().lower()
-    if not coin:
-        await message.answer("Нужен coin id")
+    pair = (message.text or "").strip().upper()
+    if not pair:
+        await message.answer("Нужен формат пары, пример: BTC/USDT")
         return
-    snapshot = fetch_crypto_snapshot(coin)
-    if not snapshot:
-        await message.answer("Монета не найдена")
-        return
-    prompt = f"Монета {coin}, usd={snapshot.get('usd')}, change24={snapshot.get('usd_24h_change')}, cap={snapshot.get('usd_market_cap')}"
-    answer = await run_llm_with_status(message, status_for("crypto"), lambda: ask_llm(openai_client, OPENROUTER_MODEL, OPENROUTER_API_KEY, "Ты крипто-аналитик", prompt, max_tokens=450))
+
+    report = await asyncio.to_thread(analyze_binance_pair, pair)
     await state.clear()
-    await message.answer(answer, reply_markup=user_menu(message.from_user.id))
+    await message.answer(report, reply_markup=user_menu(message.from_user.id))
 
 
 @dp.message(F.text == BTN_PROJECTS)
