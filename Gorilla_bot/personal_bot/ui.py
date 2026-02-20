@@ -12,6 +12,7 @@ BTN_GROUP = "🛡 Группы и права"
 BTN_BACK = "⬅️ Назад"
 BTN_PROJECTS = "📁 Мои проекты"
 BTN_CREATE_PROJECT = "🚀 Создать проект"
+BTN_PROJECT_WIZARD = "✨ Запустить мастер проекта"
 BTN_ACCOUNT = "⚙️ Аккаунт"
 
 BTN_ADD_CHANNEL = "➕ Добавить канал"
@@ -32,12 +33,10 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
 
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_AI), KeyboardButton(text=BTN_ACCESS)],
+            [KeyboardButton(text=BTN_AI)],
             [KeyboardButton(text=BTN_NAVIGATOR), KeyboardButton(text=BTN_AI_HELP)],
             [KeyboardButton(text=BTN_ESOTERIC), KeyboardButton(text=BTN_CRYPTO)],
-            [KeyboardButton(text=BTN_AUTOPOST), KeyboardButton(text=BTN_MY)],
-            [KeyboardButton(text=BTN_PROJECTS), KeyboardButton(text=BTN_CREATE_PROJECT)],
-            [KeyboardButton(text=BTN_GROUP), KeyboardButton(text=BTN_ACCOUNT)],
+            [KeyboardButton(text=BTN_CREATE_PROJECT)],
         ],
         resize_keyboard=True,
     )
@@ -46,6 +45,19 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
 def back_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text=BTN_BACK)]],
+        resize_keyboard=True,
+    )
+
+
+def project_hub_keyboard() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text=BTN_PROJECT_WIZARD)],
+            [KeyboardButton(text=BTN_PROJECTS), KeyboardButton(text=BTN_AUTOPOST)],
+            [KeyboardButton(text=BTN_MY), KeyboardButton(text=BTN_GROUP)],
+            [KeyboardButton(text=BTN_ACCOUNT)],
+            [KeyboardButton(text=BTN_BACK)],
+        ],
         resize_keyboard=True,
     )
 

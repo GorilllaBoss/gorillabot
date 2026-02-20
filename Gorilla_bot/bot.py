@@ -24,6 +24,7 @@ from personal_bot.ui import (
     BTN_AUTOPOST,
     BTN_BACK,
     BTN_CREATE_PROJECT,
+    BTN_PROJECT_WIZARD,
     BTN_CRYPTO,
     BTN_ESOTERIC,
     BTN_GROUP,
@@ -33,6 +34,7 @@ from personal_bot.ui import (
     autopost_menu_keyboard,
     back_menu,
     main_menu,
+    project_hub_keyboard,
 )
 
 bot = None
@@ -485,6 +487,21 @@ async def my_projects(message: types.Message):
 
 
 @dp.message(F.text == BTN_CREATE_PROJECT)
+async def open_project_hub(message: types.Message):
+    if not await ensure_premium(message):
+        return
+    await message.answer(
+        "🚀 Создать проект\n\n"
+        "Здесь ты настраиваешь свой AI-автопостинг под ключ:\n"
+        "• любой канал и тема\n"
+        "• любое оформление и стиль\n"
+        "• гибкая частота и рандом\n"
+        "• глубокая настройка через ИИ без разработчика.",
+        reply_markup=project_hub_keyboard(),
+    )
+
+
+@dp.message(F.text == BTN_PROJECT_WIZARD)
 async def create_project(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
