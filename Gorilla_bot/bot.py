@@ -179,6 +179,54 @@ async def cmd_menu(message: types.Message):
     await message.answer("🏠 Главное меню", reply_markup=user_menu(message.from_user.id))
 
 
+@dp.message(F.text.in_([
+    BTN_AI,
+    BTN_ACCESS,
+    BTN_AI_HELP,
+    BTN_NAVIGATOR,
+    BTN_ESOTERIC,
+    BTN_CRYPTO,
+    BTN_CREATE_PROJECT,
+    BTN_PROJECT_WIZARD,
+    BTN_PROJECTS,
+    BTN_AUTOPOST,
+    BTN_MY,
+    BTN_GROUP,
+    BTN_ACCOUNT,
+]))
+async def route_menu_buttons(message: types.Message, state: FSMContext):
+    if await state.get_state():
+        await state.clear()
+
+    text = message.text
+    if text == BTN_AI:
+        await ask_ai(message, state)
+    elif text == BTN_ACCESS:
+        await cmd_access(message, state)
+    elif text == BTN_AI_HELP:
+        await ai_help_menu(message, state)
+    elif text == BTN_NAVIGATOR:
+        await navigator_entry(message, state)
+    elif text == BTN_ESOTERIC:
+        await esoteric_menu(message, state)
+    elif text == BTN_CRYPTO:
+        await crypto_menu(message, state)
+    elif text == BTN_CREATE_PROJECT:
+        await open_project_hub(message)
+    elif text == BTN_PROJECT_WIZARD:
+        await create_project(message, state)
+    elif text == BTN_PROJECTS:
+        await my_projects(message)
+    elif text == BTN_AUTOPOST:
+        await autopost_menu(message)
+    elif text == BTN_MY:
+        await my_channels(message)
+    elif text == BTN_GROUP:
+        await group_menu(message)
+    elif text == BTN_ACCOUNT:
+        await account(message)
+
+
 @dp.message(F.text == BTN_BACK)
 async def back_to_menu(message: types.Message, state: FSMContext):
     await state.clear()
