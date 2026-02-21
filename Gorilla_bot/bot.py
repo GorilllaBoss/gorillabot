@@ -794,7 +794,8 @@ async def crypto_run(message: types.Message, state: FSMContext):
 
 @dp.callback_query(F.data.startswith("crypto:"))
 async def crypto_quick_actions(callback: types.CallbackQuery, state: FSMContext):
-    if not await ensure_premium(callback.message):
+    if not user_has_premium(DATA_FILE, callback.from_user.id):
+        await callback.message.answer("🔐 Функция доступна после кода. Нажми «🔐 Премиум услуги».", reply_markup=user_menu(callback.from_user.id))
         await callback.answer()
         return
 

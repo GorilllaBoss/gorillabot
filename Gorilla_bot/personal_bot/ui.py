@@ -33,7 +33,7 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
 
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text=BTN_AI), KeyboardButton(text=BTN_ACCESS)],
+            [KeyboardButton(text=BTN_AI)],
             [KeyboardButton(text=BTN_NAVIGATOR), KeyboardButton(text=BTN_PSYCHOLOGY)],
             [KeyboardButton(text=BTN_ESOTERIC), KeyboardButton(text=BTN_CRYPTO)],
             [KeyboardButton(text=BTN_CREATE_PROJECT)],

@@ -207,6 +207,20 @@ def _fetch_binance_24h(symbol: str, api_key: str = "") -> dict:
     return payload
 
 
+
+
+def _fmt_price(v: float) -> str:
+    a = abs(v)
+    if a >= 100:
+        return f"{v:,.2f}"
+    if a >= 1:
+        return f"{v:,.3f}"
+    if a >= 0.1:
+        return f"{v:,.4f}"
+    if a >= 0.01:
+        return f"{v:,.5f}"
+    return f"{v:,.6f}"
+
 def analyze_binance_pair(pair: str, api_key: str = "") -> str:
     raw = (pair or "").upper().replace(" ", "")
     symbol = raw.replace("/", "")
@@ -271,16 +285,16 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
     bias_score += 1 if bb_pos >= 0.55 else -1 if bb_pos <= 0.45 else 0
 
     if bias_score >= 3:
-        rec = f"Бычий наклон. Пробой ${bb_u:,.2f} может усилить рост. Следить за объёмом."
+        rec = f"Бычий наклон. Пробой ${_fmt_price(bb_u)} может усилить рост. Следить за объёмом."
     elif bias_score >= 1:
-        rec = f"Нейтрально-бычий наклон. Следить за пробоем ${bb_u:,.2f} для подтверждения роста."
+        rec = f"Нейтрально-бычий наклон. Следить за пробоем ${_fmt_price(bb_u)} для подтверждения роста."
     elif bias_score <= -3:
-        rec = f"Медвежий наклон. Потеря ${bb_l:,.2f} может ускорить снижение. Нужен контроль риска."
+        rec = f"Медвежий наклон. Потеря ${_fmt_price(bb_l)} может ускорить снижение. Нужен контроль риска."
     else:
-        rec = f"Нейтральный сценарий. Ключевой диапазон: ${bb_l:,.2f} — ${bb_u:,.2f}."
+        rec = f"Нейтральный сценарий. Ключевой диапазон: ${_fmt_price(bb_l)} — ${_fmt_price(bb_u)}."
 
     return (
-        f"{pretty}: ${price:,.2f}\n\n"
+        f"{pretty}: ${_fmt_price(price)}\n\n"
         "Технический анализ:\n"
         f"• RSI {rsi_15:.2f} - {rsi_text}\n"
         f"• Цена {'выше' if above_ema_15 else 'ниже'} EMA(50) на 15м и {'выше' if above_ema_1h else 'ниже'} на 1ч\n"
@@ -289,9 +303,9 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         f"• MACD {macd_text}\n"
         f"• Bollinger Bands: цена в {'верхней' if bb_pos >= 0.5 else 'нижней'} половине канала ({bb_pos:.2f})\n\n"
         "Ключевые уровни:\n"
-        f"• Сопротивление: ${bb_u:,.2f} (верхняя полоса BB)\n"
-        f"• Поддержка: ${bb_l:,.2f} (нижняя полоса BB)\n"
-        f"• EMA(50) 4ч: ${ema50_4h:,.2f} (ближайший уровень)\n\n"
+        f"• Сопротивление: ${_fmt_price(bb_u)} (верхняя полоса BB)\n"
+        f"• Поддержка: ${_fmt_price(bb_l)} (нижняя полоса BB)\n"
+        f"• EMA(50) 4ч: ${_fmt_price(ema50_4h)} (ближайший уровень)\n\n"
         "Рекомендация:\n"
         f"{rec}"
     )
