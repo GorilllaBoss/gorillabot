@@ -191,7 +191,6 @@ def user_menu(user_id: int):
 
 def is_premium_only_module(text: str) -> bool:
     premium_buttons = {
-        BTN_AI,
         BTN_PSYCHOLOGY,
         BTN_NAVIGATOR,
         BTN_ESOTERIC,
@@ -461,8 +460,6 @@ async def process_access_code(message: types.Message, state: FSMContext):
 @dp.message(F.text == BTN_AI)
 @dp.message(Command("ask"))
 async def ask_ai(message: types.Message, state: FSMContext):
-    if not await ensure_premium(message):
-        return
     text = (message.text or "").replace("/ask", "", 1).strip()
     if not text:
         await state.set_state(AssistantState.waiting_question)

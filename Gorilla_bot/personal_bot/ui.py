@@ -25,6 +25,7 @@ def main_menu(is_premium: bool = False) -> ReplyKeyboardMarkup:
     if not is_premium:
         return ReplyKeyboardMarkup(
             keyboard=[
+                [KeyboardButton(text=BTN_AI)],
                 [KeyboardButton(text=BTN_ACCESS)],
             ],
             resize_keyboard=True,
