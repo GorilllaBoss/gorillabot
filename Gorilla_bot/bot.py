@@ -343,6 +343,20 @@ def status_for(section: str):
     }[section]
 
 
+def crypto_suggestions_kb(base_pair: str = "BTC/USDT") -> InlineKeyboardMarkup:
+    base = (base_pair or "BTC/USDT").upper().replace(" ", "")
+    second = "ETH/USDT" if not base.startswith("ETH") else "BTC/USDT"
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=f"Анализ {second.split('/')[0]}", callback_data=f"crypto:pair:{second}")],
+            [InlineKeyboardButton(text=f"Сетап на {base.split('/')[0]}", callback_data=f"crypto:setup:{base}")],
+            [InlineKeyboardButton(text=f"Куда может пойти {base.split('/')[0]}?", callback_data=f"crypto:where:{base}")],
+            [InlineKeyboardButton(text="Что купить?", callback_data=f"crypto:buy:{base}")],
+            [InlineKeyboardButton(text="Мои позиции", callback_data=f"crypto:positions:{base}")],
+        ]
+    )
+
+
 async def ensure_premium(message: types.Message) -> bool:
     if user_has_premium(DATA_FILE, message.from_user.id):
         return True
@@ -751,7 +765,11 @@ async def crypto_menu(message: types.Message, state: FSMContext):
     if not await ensure_premium(message):
         return
     await state.set_state(CryptoState.waiting_coin)
-    await message.answer("Введи монету или пару Binance: биткоин / btc / ETH / BTC/USDT", reply_markup=back_menu())
+    await message.answer(
+        "Введи монету или пару Binance: биткоин / btc / ETH / BTC/USDT\n"
+        "После анализа можно задавать вопросы: куда может пойти актив, где риск, какие сценарии.",
+        reply_markup=back_menu(),
+    )
 
 
 @dp.message(CryptoState.waiting_coin)
@@ -768,8 +786,94 @@ async def crypto_run(message: types.Message, state: FSMContext):
     if report.startswith("⚠️"):
         await message.answer(report + "\nПопробуй другой вариант: BTC/USDT, ETH/USDT, LINK/USDT")
         return
-    await state.clear()
-    await message.answer(report, reply_markup=user_menu(message.from_user.id))
+    await state.set_state(CryptoState.waiting_followup)
+    await state.update_data(last_pair=pair, last_report=report)
+    await message.answer(report)
+    await message.answer(
+        "Могу продолжить как AI-крипто ассистент. Выбери быстрый сценарий или задай вопрос текстом 👇",
+        reply_markup=crypto_suggestions_kb(pair),
+    )
+
+
+@dp.callback_query(F.data.startswith("crypto:"))
+async def crypto_quick_actions(callback: types.CallbackQuery, state: FSMContext):
+    if not await ensure_premium(callback.message):
+        await callback.answer()
+        return
+
+    _, action, pair = callback.data.split(":", 2)
+    pair = pair.upper()
+    await state.set_state(CryptoState.waiting_followup)
+
+    if action == "pair":
+        report = await asyncio.to_thread(analyze_binance_pair, pair, BINANCE_API_KEY)
+        await state.update_data(last_pair=pair, last_report=report)
+        await callback.message.answer(report)
+        await callback.message.answer("Готово. Можно разобрать следующий сценарий 👇", reply_markup=crypto_suggestions_kb(pair))
+        await callback.answer()
+        return
+
+    prompts = {
+        "setup": f"Сделай 2 торговых сетапа по {pair}: консервативный и агрессивный. Укажи триггер входа, стоп, цели и риск.",
+        "where": f"Дай 2-3 сценария движения цены по {pair} на ближайшие 24-72 часа и что будет подтверждением каждого сценария.",
+        "buy": f"Я частный инвестор. Как аккуратно зайти в {pair}? Дай 2 варианта (DCA и по подтверждению), с рисками.",
+        "positions": f"Составь чек-лист управления позицией по {pair}: что отслеживать, когда сокращать риск, когда фиксировать прибыль.",
+    }
+    user_prompt = prompts.get(action, prompts["where"])
+    data = await state.get_data()
+    context_report = data.get("last_report", "")[:2500]
+    answer = await run_llm_with_status(
+        callback.message,
+        status_for("crypto"),
+        lambda: ask_llm(
+            openai_client,
+            OPENROUTER_MODEL,
+            OPENROUTER_API_KEY,
+            "Ты AI крипто-ассистент: объясняешь сценарии движения актива простым языком, даёшь 2-3 варианта действий и риски. Без гарантий и без финансовых обещаний.",
+            f"Контекст тех.анализа:\n{context_report}\n\nЗапрос: {user_prompt}",
+            max_tokens=850,
+        ),
+    )
+    await callback.message.answer(f"📌 {pair}\n\n{answer}")
+    await callback.message.answer("Если нужно — продолжим разбор 👇", reply_markup=crypto_suggestions_kb(pair))
+    await callback.answer()
+
+
+@dp.message(CryptoState.waiting_followup)
+async def crypto_followup(message: types.Message, state: FSMContext):
+    text = (message.text or "").strip()
+    if not text:
+        return
+
+    resolved = resolve_binance_pair_input(text)
+    if resolved.get("ok"):
+        pair = resolved["pair"]
+        report = await asyncio.to_thread(analyze_binance_pair, pair, BINANCE_API_KEY)
+        if report.startswith("⚠️"):
+            await message.answer(report)
+            return
+        await state.update_data(last_pair=pair, last_report=report)
+        await message.answer(report)
+        await message.answer("Выбери следующий сценарий или задай вопрос 👇", reply_markup=crypto_suggestions_kb(pair))
+        return
+
+    data = await state.get_data()
+    pair = data.get("last_pair", "BTC/USDT")
+    context_report = data.get("last_report", "")[:2500]
+    answer = await run_llm_with_status(
+        message,
+        status_for("crypto"),
+        lambda: ask_llm(
+            openai_client,
+            OPENROUTER_MODEL,
+            OPENROUTER_API_KEY,
+            "Ты AI крипто-ассистент. Отвечай по текущему активу, давай 2-3 варианта развития и практичные действия с рисками.",
+            f"Актив: {pair}\nТех. контекст:\n{context_report}\n\nВопрос пользователя: {text}",
+            max_tokens=850,
+        ),
+    )
+    await message.answer(f"📌 {pair}\n\n{answer}")
+    await message.answer("Могу продолжить, выбери вариант 👇", reply_markup=crypto_suggestions_kb(pair))
 
 
 @dp.message(F.text == BTN_PROJECTS)

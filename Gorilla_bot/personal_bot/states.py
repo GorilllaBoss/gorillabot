@@ -11,6 +11,7 @@ class AssistantState(StatesGroup):
 
 class CryptoState(StatesGroup):
     waiting_coin = State()
+    waiting_followup = State()
 
 
 class PsychologyState(StatesGroup):
