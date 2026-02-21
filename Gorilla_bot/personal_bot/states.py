@@ -28,6 +28,12 @@ class NavigatorState(StatesGroup):
     waiting_message = State()
 
 
+class LanguageState(StatesGroup):
+    waiting_language = State()
+    waiting_mode = State()
+    waiting_answer = State()
+
+
 class ChannelSetupState(StatesGroup):
     waiting_name = State()
     waiting_chat_id = State()
