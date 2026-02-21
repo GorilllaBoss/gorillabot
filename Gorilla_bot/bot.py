@@ -63,6 +63,19 @@ TOPIC_QUESTIONS = {
     "risk tolerance": "Насколько ты готов рисковать от 1 до 10 и почему?",
 }
 
+SPICY_QUESTIONS = [
+    "Можно странный вопрос? Если деньги не проблема — чем займёшься в ближайший год?",
+    "Если бы у тебя был 1 свободный год, какой навык ты бы прокачал до уровня топ-1%?",
+    "Какой выбор ты откладываешь уже месяц, хотя знаешь правильный шаг?",
+]
+
+MICRO_INSIGHTS = [
+    "⚡ Считываю тебя как человека действия: лучше короткий рывок, чем бесконечная теория.",
+    "⚡ У тебя сильный фокус на результате — это хороший фундамент для роста.",
+    "⚡ Вижу дисциплинарный запрос: ты хочешь не просто мотивацию, а рабочую систему.",
+    "⚡ Ты честно смотришь на ограничения — это ускоряет прогресс сильнее любой техники.",
+]
+
 ESOTERIC_MENU = {
     "🃏 Таро": {
         "description": "Архетипический разбор ситуации через символы карт и практический вектор действий.",
@@ -275,14 +288,32 @@ def parse_analysis(text: str) -> dict:
 def next_onboarding_question(profile: dict, last_user: str = "") -> str:
     if last_user.lower().strip() in {"не знаю", "сложно", "хз"}:
         return "Окей, упростим: тебе ближе контент, продажи или продукт?"
-    if random.random() < 0.2:
-        return "Можно странный вопрос? Если деньги не проблема — чем займёшься в ближайший год?"
+
+    spicy_seen = profile.setdefault("onboarding_spicy_seen", [])
+    spicy_available = [q for q in SPICY_QUESTIONS if q not in spicy_seen]
+    if spicy_available and random.random() < 0.2:
+        q = random.choice(spicy_available)
+        spicy_seen.append(q)
+        profile["last_onboarding_question"] = q
+        return q
+
     seen = profile.get("onboarding_topics", [])
     available = [x for x in TOPIC_QUESTIONS if x not in seen] or list(TOPIC_QUESTIONS)
     topic = random.choice(available)
     seen.append(topic)
     profile["onboarding_topics"] = seen
-    return TOPIC_QUESTIONS[topic]
+    q = TOPIC_QUESTIONS[topic]
+    profile["last_onboarding_question"] = q
+    return q
+
+
+def onboarding_micro_insight(user_text: str, user_count: int) -> str:
+    text = (user_text or "").lower()
+    if any(x in text for x in ["дисцип", "фокус", "привыч"]):
+        return "⚡ Фокус на дисциплине — это сильный сигнал. Из этого обычно рождается стабильный рост."
+    if any(x in text for x in ["страх", "ошиб", "сомнен"]):
+        return "⚡ Ты честно называешь внутренние стоп-факторы. Это уже половина решения."
+    return MICRO_INSIGHTS[(user_count // 3) % len(MICRO_INSIGHTS)]
 
 
 async def run_llm_with_status(message: types.Message, statuses: list[str], llm_call):
@@ -522,10 +553,16 @@ async def navigator_onboarding(message: types.Message, state: FSMContext):
         set_user_record(DATA_FILE, message.from_user.id, record)
         await state.set_state(NavigatorState.coach)
         await message.answer("🎉 Навигация завершена.\nТеперь я твой персональный ассистент.", reply_markup=dashboard_kb())
+        await message.answer(
+            "Чтобы напоминания были точными, уточни:\n"
+            "• 🎯 Мои цели\n"
+            "• 📅 План сегодня\n"
+            "• ⏰ Напоминания"
+        )
         return
 
     if user_count % 3 == 0:
-        await message.answer("⚡ Похоже, ты практик: быстро переводишь мысли в действия.")
+        await message.answer(onboarding_micro_insight(user_text, user_count))
     q = next_onboarding_question(profile, user_text)
     record["user_life_profile"] = profile
     set_user_record(DATA_FILE, message.from_user.id, record)
@@ -540,11 +577,20 @@ async def navigator_dashboard_actions(message: types.Message, state: FSMContext)
     profile = record.get("user_life_profile") or default_life_profile()
 
     if message.text == NAV_BTN_GOALS:
-        await message.answer("🎯 Мои цели:\n" + "\n".join(f"• {x}" for x in profile.get("goals", [])))
+        goals = profile.get("goals", [])
+        await state.set_state(NavigatorState.edit_goals)
+        await message.answer(
+            "🎯 Мои цели:\n" + "\n".join(f"• {x}" for x in goals) + "\n\n"
+            "Отправь новые цели одним сообщением (через запятую или с новой строки)."
+        )
     elif message.text == NAV_BTN_PROFILE:
         await message.answer(f"📊 Архетип: {profile.get('archetype')}\n\n{profile.get('ai_analysis','')[:3500]}")
     elif message.text == NAV_BTN_TODAY:
-        await message.answer(f"📅 План сегодня:\n{profile.get('daily_plan')}")
+        await state.set_state(NavigatorState.edit_today)
+        await message.answer(
+            f"📅 План сегодня:\n{profile.get('daily_plan')}\n\n"
+            "Отправь обновлённый фокус на сегодня (1-3 конкретных шага)."
+        )
     elif message.text == NAV_BTN_REMIND:
         await state.set_state(NavigatorState.reminders)
         await message.answer("Режим напоминаний: ежедневно / еженедельно / ежемесячно / off")
@@ -574,6 +620,43 @@ async def navigator_reminders(message: types.Message, state: FSMContext):
     set_user_record(DATA_FILE, message.from_user.id, record)
     await state.set_state(NavigatorState.coach)
     await message.answer("✅ Настройки сохранены", reply_markup=dashboard_kb())
+
+
+@dp.message(NavigatorState.edit_goals)
+async def navigator_edit_goals(message: types.Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    if not raw:
+        await message.answer("⚠️ Напиши хотя бы 1 цель")
+        return
+    parts = [x.strip("• -\t ") for x in raw.replace("\n", ",").split(",") if x.strip()]
+    goals = parts[:5]
+    if not goals:
+        await message.answer("⚠️ Не смог выделить цели. Попробуй ещё раз.")
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    profile["goals"] = goals
+    profile["last_update"] = datetime.now().isoformat()
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.set_state(NavigatorState.coach)
+    await message.answer("✅ Цели обновлены и сохранены", reply_markup=dashboard_kb())
+
+
+@dp.message(NavigatorState.edit_today)
+async def navigator_edit_today(message: types.Message, state: FSMContext):
+    daily = (message.text or "").strip()
+    if len(daily) < 4:
+        await message.answer("⚠️ Напиши чуть подробнее, что сделать сегодня")
+        return
+    record = get_user_record(DATA_FILE, message.from_user.id)
+    profile = record.get("user_life_profile") or default_life_profile()
+    profile["daily_plan"] = daily
+    profile["last_update"] = datetime.now().isoformat()
+    record["user_life_profile"] = profile
+    set_user_record(DATA_FILE, message.from_user.id, record)
+    await state.set_state(NavigatorState.coach)
+    await message.answer("✅ План на сегодня сохранён", reply_markup=dashboard_kb())
 
 
 @dp.message(NavigatorState.update)

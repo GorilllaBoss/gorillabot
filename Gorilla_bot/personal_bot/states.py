@@ -28,6 +28,8 @@ class NavigatorState(StatesGroup):
     coach = State()
     update = State()
     reminders = State()
+    edit_goals = State()
+    edit_today = State()
 
 
 class ProjectState(StatesGroup):
