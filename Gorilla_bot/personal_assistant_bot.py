@@ -32,6 +32,7 @@ from personal_bot.states import (
     ChannelSetupState,
     CryptoState,
     EsotericState,
+    LanguageState,
     NavigatorState,
     PsychologyState,
 )
@@ -45,6 +46,7 @@ from personal_bot.ui import (
     BTN_CRYPTO,
     BTN_ESOTERIC,
     BTN_GROUP,
+    BTN_LANGUAGES,
     BTN_MODE_FIXED,
     BTN_MODE_INTERVAL,
     BTN_MODE_RANDOM,
@@ -290,6 +292,116 @@ STOP CONDITION:
 """
 
 
+LANGUAGE_LEARNING_CONTENT = {
+    "english": {
+        "title": "🇬🇧 English",
+        "greeting": "Hello! How are you?",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [
+            ("today", "сегодня"),
+            ("goal", "цель"),
+            ("practice", "практика"),
+            ("travel", "путешествие"),
+            ("friend", "друг"),
+        ],
+        "quiz": {
+            "question": "Как будет «цель» по-английски?",
+            "answer": "goal",
+            "hint": "Начинается на g",
+        },
+    },
+    "spanish": {
+        "title": "🇪🇸 Español",
+        "greeting": "¡Hola! ¿Cómo estás?",
+        "greeting_ru": "Привет! Как ты?",
+        "words": [("gracias", "спасибо"), ("amigo", "друг"), ("viaje", "путешествие"), ("meta", "цель"), ("hoy", "сегодня")],
+        "quiz": {"question": "Как будет «спасибо» по-испански?", "answer": "gracias", "hint": "Слово начинается на g"},
+    },
+    "french": {
+        "title": "🇫🇷 Français",
+        "greeting": "Salut! Comment ça va?",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [("bonjour", "добрый день"), ("objectif", "цель"), ("ami", "друг"), ("voyage", "путешествие"), ("aujourd'hui", "сегодня")],
+        "quiz": {"question": "Как по-французски «друг»?", "answer": "ami", "hint": "Короткое слово из 3 букв"},
+    },
+    "german": {
+        "title": "🇩🇪 Deutsch",
+        "greeting": "Hallo! Wie geht's?",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [("danke", "спасибо"), ("ziel", "цель"), ("freund", "друг"), ("reise", "путешествие"), ("heute", "сегодня")],
+        "quiz": {"question": "Как будет «спасибо» по-немецки?", "answer": "danke", "hint": "Начинается на d"},
+    },
+    "italian": {
+        "title": "🇮🇹 Italiano",
+        "greeting": "Ciao! Come stai?",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [("grazie", "спасибо"), ("obiettivo", "цель"), ("amico", "друг"), ("viaggio", "путешествие"), ("oggi", "сегодня")],
+        "quiz": {"question": "Как по-итальянски «друг»?", "answer": "amico", "hint": "Начинается на a"},
+    },
+    "portuguese": {
+        "title": "🇵🇹 Português",
+        "greeting": "Olá! Tudo bem?",
+        "greeting_ru": "Привет! Всё хорошо?",
+        "words": [("obrigado", "спасибо"), ("meta", "цель"), ("amigo", "друг"), ("viagem", "путешествие"), ("hoje", "сегодня")],
+        "quiz": {"question": "Как по-португальски «сегодня»?", "answer": "hoje", "hint": "Начинается на h"},
+    },
+    "chinese": {
+        "title": "🇨🇳 中文 (Mandarin)",
+        "greeting": "你好！你好吗？ (Nǐ hǎo! Nǐ hǎo ma?)",
+        "greeting_ru": "Привет! Как ты?",
+        "words": [("谢谢 (xièxie)", "спасибо"), ("朋友 (péngyou)", "друг"), ("目标 (mùbiāo)", "цель"), ("今天 (jīntiān)", "сегодня"), ("旅行 (lǚxíng)", "путешествие")],
+        "quiz": {"question": "Как по-китайски «спасибо» (пиньинь)?", "answer": "xiexie", "hint": "Звук «сье-сье»"},
+    },
+    "japanese": {
+        "title": "🇯🇵 日本語",
+        "greeting": "こんにちは！お元気ですか？",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [("ありがとう (arigatou)", "спасибо"), ("友達 (tomodachi)", "друг"), ("目標 (mokuhyou)", "цель"), ("今日 (kyou)", "сегодня"), ("旅行 (ryokou)", "путешествие")],
+        "quiz": {"question": "Как по-японски «друг» (ромадзи)?", "answer": "tomodachi", "hint": "Начинается на t"},
+    },
+    "korean": {
+        "title": "🇰🇷 한국어",
+        "greeting": "안녕하세요! 어떻게 지내요?",
+        "greeting_ru": "Здравствуйте! Как поживаете?",
+        "words": [("감사합니다 (gamsahamnida)", "спасибо"), ("친구 (chingu)", "друг"), ("목표 (mokpyo)", "цель"), ("오늘 (oneul)", "сегодня"), ("여행 (yeohaeng)", "путешествие")],
+        "quiz": {"question": "Как по-корейски «друг» (латиницей)?", "answer": "chingu", "hint": "Слово начинается на ch"},
+    },
+    "arabic": {
+        "title": "🇸🇦 العربية",
+        "greeting": "مرحبًا! كيف حالك؟ (Marhaban! Kayfa haluk?)",
+        "greeting_ru": "Привет! Как дела?",
+        "words": [("شكرا (shukran)", "спасибо"), ("صديق (sadiq)", "друг"), ("هدف (hadaf)", "цель"), ("اليوم (alyawm)", "сегодня"), ("سفر (safar)", "путешествие")],
+        "quiz": {"question": "Как по-арабски «спасибо» (латиницей)?", "answer": "shukran", "hint": "Начинается на sh"},
+    },
+}
+
+
+def language_catalog_text() -> str:
+    lines = ["🌍 Топ-10 языков для изучения:"]
+    for idx, data in enumerate(LANGUAGE_LEARNING_CONTENT.values(), 1):
+        lines.append(f"{idx}) {data['title']}")
+    return "\n".join(lines)
+
+
+def normalize_answer(text: str) -> str:
+    cleaned = (text or "").strip().lower()
+    return cleaned.replace("ё", "е").replace(" ", "")
+
+
+def build_language_lesson(language_key: str) -> str:
+    data = LANGUAGE_LEARNING_CONTENT[language_key]
+    words = "\n".join([f"• {word} — {translation}" for word, translation in data["words"]])
+    return (
+        f"{data['title']}\n\n"
+        f"Фраза дня: {data['greeting']}\n"
+        f"Перевод: {data['greeting_ru']}\n\n"
+        f"Мини-словарь:\n{words}\n\n"
+        "Дальше выбери режим:\n"
+        "1) lesson — еще мини-урок\n"
+        "2) quiz — мини-тест"
+    )
+
+
 
 async def ensure_premium(message: types.Message) -> bool:
     if user_has_premium(DATA_FILE, message.from_user.id):
@@ -304,6 +416,7 @@ async def cmd_start(message: types.Message):
         "🚀 Добро пожаловать в личный AI-бот!\n\n"
         "Выбери раздел в меню ниже 👇\n"
         "• 🤖 AI ассистент (для всех)\n"
+        "• 🌍 Изучение языков (10 популярных)\n"
         "• 🔐 Премиум функции по коду\n"
         "• 📣 Автопостинг с гибким расписанием\n"
         "• 📈 Крипто, 🧠 Психология и 🪄 Эзотерика",
@@ -773,6 +886,94 @@ async def psychology_ai_run(message: types.Message):
         ),
     )
     await message.answer(f"🧠 {answer}")
+
+
+@dp.message(F.text == BTN_LANGUAGES)
+async def languages_menu(message: types.Message, state: FSMContext):
+    await state.set_state(LanguageState.waiting_language)
+    await message.answer(
+        "🌍 Режим изучения языков\n\n"
+        "Я помогу учить 10 самых популярных языков:"
+        " мини-уроки + мини-квиз.\n\n"
+        f"{language_catalog_text()}\n\n"
+        "Отправь номер языка (1-10).",
+        reply_markup=back_menu(),
+    )
+
+
+@dp.message(LanguageState.waiting_language)
+async def languages_choose(message: types.Message, state: FSMContext):
+    raw = (message.text or "").strip()
+    if not raw.isdigit() or not (1 <= int(raw) <= 10):
+        await message.answer("⚠️ Введи номер языка от 1 до 10.")
+        return
+
+    key = list(LANGUAGE_LEARNING_CONTENT.keys())[int(raw) - 1]
+    await state.update_data(language_key=key)
+    await state.set_state(LanguageState.waiting_mode)
+    await message.answer(build_language_lesson(key))
+
+
+@dp.message(LanguageState.waiting_mode)
+async def languages_mode(message: types.Message, state: FSMContext):
+    mode = (message.text or "").strip().lower()
+    data = await state.get_data()
+    language_key = data.get("language_key")
+    if not language_key:
+        await state.set_state(LanguageState.waiting_language)
+        await message.answer("⚠️ Язык не выбран. Сначала отправь номер языка (1-10).")
+        return
+
+    language_data = LANGUAGE_LEARNING_CONTENT[language_key]
+    if mode in {"lesson", "урок", "1"}:
+        await message.answer(build_language_lesson(language_key))
+        return
+
+    if mode in {"quiz", "тест", "2"}:
+        await state.set_state(LanguageState.waiting_answer)
+        quiz = language_data["quiz"]
+        await message.answer(
+            f"📝 Мини-квиз: {quiz['question']}\n"
+            f"Подсказка: {quiz['hint']}\n\n"
+            "Напиши свой ответ одним словом."
+        )
+        return
+
+    await message.answer("⚠️ Напиши `lesson` или `quiz` (или 1/2).")
+
+
+@dp.message(LanguageState.waiting_answer)
+async def languages_quiz_check(message: types.Message, state: FSMContext):
+    user_answer = normalize_answer(message.text or "")
+    data = await state.get_data()
+    language_key = data.get("language_key")
+    if not language_key:
+        await state.set_state(LanguageState.waiting_language)
+        await message.answer("⚠️ Давай начнем заново. Выбери язык номером от 1 до 10.")
+        return
+
+    language_data = LANGUAGE_LEARNING_CONTENT[language_key]
+    correct = normalize_answer(language_data["quiz"]["answer"])
+
+    if user_answer == correct:
+        record = get_user_record(DATA_FILE, message.from_user.id)
+        progress = record.get("language_progress", {})
+        progress[language_key] = int(progress.get(language_key, 0)) + 1
+        record["language_progress"] = progress
+        set_user_record(DATA_FILE, message.from_user.id, record)
+        await state.set_state(LanguageState.waiting_mode)
+        await message.answer(
+            f"✅ Верно! +1 очко в {language_data['title']}\n"
+            f"Твой прогресс: {progress[language_key]}\n\n"
+            "Продолжим? Напиши `lesson` или `quiz`."
+        )
+        return
+
+    await message.answer(
+        f"❌ Пока неверно. Правильный ответ: {language_data['quiz']['answer']}\n"
+        "Попробуй еще раз: напиши `quiz` для нового вопроса или `lesson` для повторения."
+    )
+    await state.set_state(LanguageState.waiting_mode)
 
 
 @dp.message(F.text == BTN_ESOTERIC)

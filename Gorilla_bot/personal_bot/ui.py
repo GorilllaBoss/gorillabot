@@ -7,6 +7,7 @@ BTN_CRYPTO = "📈 Крипто анализ"
 BTN_ESOTERIC = "🪄 Эзотерика"
 BTN_PSYCHOLOGY = "🧠 Психология"
 BTN_NAVIGATOR = "🧭 Тебе точно сюда"
+BTN_LANGUAGES = "🌍 Изучение языков"
 BTN_MY = "🗂 Мои каналы"
 BTN_GROUP = "🛡 Группы и права"
 BTN_BACK = "⬅️ Назад"
@@ -24,6 +25,7 @@ def main_menu() -> ReplyKeyboardMarkup:
             [KeyboardButton(text=BTN_AUTOPOST), KeyboardButton(text=BTN_MY)],
             [KeyboardButton(text=BTN_GROUP)],
             [KeyboardButton(text=BTN_CRYPTO), KeyboardButton(text=BTN_PSYCHOLOGY)],
+            [KeyboardButton(text=BTN_LANGUAGES)],
             [KeyboardButton(text=BTN_NAVIGATOR)],
             [KeyboardButton(text=BTN_ESOTERIC)],
         ],
