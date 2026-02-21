@@ -4,6 +4,7 @@ import math
 import statistics
 import urllib.parse
 import urllib.request
+from datetime import datetime
 
 from openai import OpenAI
 from openai import AuthenticationError, OpenAIError
@@ -80,8 +81,14 @@ def ask_llm(client: OpenAI, model: str, api_key: str, system_prompt: str, user_p
     if not api_key:
         return "⚠️ OPENROUTER_API_KEY не настроен. Добавь ключ в .env"
 
+    now = datetime.now()
+    current_dt = now.strftime("%d.%m.%Y %H:%M")
+    current_year = now.year
     wrapped_system = (
         f"{system_prompt}\n\n"
+        f"Текущее время: {current_dt} (локальное). Текущий год: {current_year}. "
+        "Если пользователь не указал другой период, анализируй относительно текущего времени и текущего года. "
+        "Не подставляй прошлые годы по умолчанию.\n\n"
         "Формат вывода: без символов markdown-разметки # и *. "
         "Пиши красиво, живо и понятно, можно с эмодзи."
     )
