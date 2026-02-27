@@ -13,6 +13,7 @@ from openai import AuthenticationError, OpenAIError
 PAIR_ALIASES = {
     "биткоин": "BTC",
     "биток": "BTC",
+    "битка": "BTC",
     "btc": "BTC",
     "эфир": "ETH",
     "эфириум": "ETH",
@@ -62,7 +63,8 @@ def resolve_binance_pair_input(user_text: str) -> dict:
 
     # Универсальный fallback: любой буквенный тикер вроде ADA, XRP, DOGE, AVAX, SUI...
     compact = "".join(ch for ch in text if ch.isalnum())
-    if compact.isalpha() and 2 <= len(compact) <= 12:
+    is_ascii_ticker = compact.isascii() and compact.isalpha()
+    if is_ascii_ticker and 2 <= len(compact) <= 12:
         return {"ok": True, "pair": f"{compact.upper()}/USDT"}
 
     suggestions_pool = [
