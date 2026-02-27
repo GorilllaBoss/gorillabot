@@ -22,14 +22,19 @@ PAIR_ALIASES = {
     "апт": "APT",
     "apt": "APT",
     "оп": "OP",
+    "оптимизм": "OP",
     "optimism": "OP",
     "op": "OP",
     "арб": "ARB",
+    "арбитрум": "ARB",
     "arbitrum": "ARB",
     "arb": "ARB",
     "bnb": "BNB",
     "sol": "SOL",
     "сол": "SOL",
+    "соль": "SOL",
+    "солана": "SOL",
+    "solana": "SOL",
 }
 
 
@@ -54,6 +59,11 @@ def resolve_binance_pair_input(user_text: str) -> dict:
     alias = PAIR_ALIASES.get(text)
     if alias:
         return {"ok": True, "pair": f"{alias}/USDT"}
+
+    # Универсальный fallback: любой буквенный тикер вроде ADA, XRP, DOGE, AVAX, SUI...
+    compact = "".join(ch for ch in text if ch.isalnum())
+    if compact.isalpha() and 2 <= len(compact) <= 12:
+        return {"ok": True, "pair": f"{compact.upper()}/USDT"}
 
     suggestions_pool = [
         "BTC/USDT",
