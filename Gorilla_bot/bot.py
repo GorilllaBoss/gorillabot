@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from personal_bot.config import ACCESS_CODE, BINANCE_API_KEY, BOT_TOKEN, DATA_FILE, OPENROUTER_API_KEY, OPENROUTER_MODEL, build_token_error
 from personal_bot.scheduler import add_history_text, build_post_prompt, ensure_channel_defaults, hash_exists, is_due, mark_sent
-from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot, resolve_binance_pair_input
+from personal_bot.services import analyze_binance_pair, ask_llm, fetch_crypto_snapshot, generate_trade_setup, resolve_binance_pair_input
 from personal_bot.states import AccessCodeState, AssistantState, ChannelSetupState, CryptoState, EsotericState, NavigatorState, ProjectState, PsychologyState
 from personal_bot.storage import default_group_permissions, default_life_profile, default_project, get_user_record, load_users, save_users, set_user_record, user_has_premium
 from personal_bot.ui import (
@@ -811,8 +811,14 @@ async def crypto_quick_actions(callback: types.CallbackQuery, state: FSMContext)
         await callback.answer()
         return
 
+    if action == "setup":
+        setup_text = await asyncio.to_thread(generate_trade_setup, f"дай лонг сетап {pair} риск ревард 1:2", pair, BINANCE_API_KEY)
+        await callback.message.answer(setup_text)
+        await callback.message.answer("Можно попросить и шорт: например «дай шорт на ETH с RR 1:2» 👇", reply_markup=crypto_suggestions_kb(pair))
+        await callback.answer()
+        return
+
     prompts = {
-        "setup": f"Сделай 2 торговых сетапа по {pair}: консервативный и агрессивный. Укажи триггер входа, стоп, цели и риск.",
         "where": f"Дай 2-3 сценария движения цены по {pair} на ближайшие 24-72 часа и что будет подтверждением каждого сценария.",
         "buy": f"Я частный инвестор. Как аккуратно зайти в {pair}? Дай 2 варианта (DCA и по подтверждению), с рисками.",
         "positions": f"Составь чек-лист управления позицией по {pair}: что отслеживать, когда сокращать риск, когда фиксировать прибыль.",
@@ -841,6 +847,15 @@ async def crypto_quick_actions(callback: types.CallbackQuery, state: FSMContext)
 async def crypto_followup(message: types.Message, state: FSMContext):
     text = (message.text or "").strip()
     if not text:
+        return
+
+    setup_keywords = ["сетап", "setup", "лонг", "шорт", "long", "short", "риск", "ревард", "r:r", "rr", "1к2", "1:2"]
+    if any(k in text.lower() for k in setup_keywords):
+        data = await state.get_data()
+        default_pair = data.get("last_pair", "BTC/USDT")
+        setup_text = await asyncio.to_thread(generate_trade_setup, text, default_pair, BINANCE_API_KEY)
+        await message.answer(setup_text)
+        await message.answer("Могу сделать альтернативу: «дай шорт/лонг с RR 1:3» 👇", reply_markup=crypto_suggestions_kb(default_pair))
         return
 
     resolved = resolve_binance_pair_input(text)

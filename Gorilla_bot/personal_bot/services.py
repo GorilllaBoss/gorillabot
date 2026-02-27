@@ -316,3 +316,85 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         "Рекомендация:\n"
         f"{rec}"
     )
+
+
+
+def _extract_pair_from_free_text(text: str, fallback_pair: str = "BTC/USDT") -> str:
+    raw = (text or "").lower().replace("\n", " ")
+    tokens = [t.strip(" ,.!?;:()[]{}") for t in raw.split() if t.strip()]
+    for t in tokens:
+        resolved = resolve_binance_pair_input(t)
+        if resolved.get("ok"):
+            return resolved["pair"]
+    resolved = resolve_binance_pair_input(raw)
+    if resolved.get("ok"):
+        return resolved["pair"]
+    return fallback_pair
+
+
+def _extract_rr(text: str) -> tuple[int, int]:
+    raw = (text or "").lower().replace(" ", "")
+    variants = ["r:r", "rr", "рр", "riskreward", "рискревард"]
+    for v in variants:
+        raw = raw.replace(v, "")
+    for sep in [":", "к", "x", "х", "/", "to"]:
+        if sep in raw:
+            parts = raw.split(sep)
+            for i in range(len(parts) - 1):
+                a = "".join(ch for ch in parts[i] if ch.isdigit())
+                b = "".join(ch for ch in parts[i + 1] if ch.isdigit())
+                if a and b and int(a) > 0 and int(b) > 0:
+                    return int(a), int(b)
+    return 1, 2
+
+
+def generate_trade_setup(user_text: str, default_pair: str = "BTC/USDT", api_key: str = "") -> str:
+    pair = _extract_pair_from_free_text(user_text, fallback_pair=default_pair)
+    symbol = pair.replace("/", "")
+    text = (user_text or "").lower()
+    direction = (
+        "LONG"
+        if any(k in text for k in ["лонг", "long", "buy", "покуп"])
+        else "SHORT"
+        if any(k in text for k in ["шорт", "short", "sell", "продаж"])
+        else "LONG"
+    )
+    rr_risk, rr_reward = _extract_rr(text)
+
+    try:
+        price = _fetch_binance_price(symbol, api_key=api_key)
+        closes_4h, _ = _fetch_binance_klines(symbol, "4h", 220, api_key=api_key)
+        closes_1h, _ = _fetch_binance_klines(symbol, "1h", 220, api_key=api_key)
+    except Exception as e:
+        return f"⚠️ Не удалось собрать сетап: {e}"
+
+    atr_base = statistics.pstdev(closes_4h[-30:]) if len(closes_4h) >= 30 else max(price * 0.02, 1e-8)
+    stop_pct = max(2.5, min(7.5, (atr_base / price) * 100 * 1.8))
+    take_pct = stop_pct * (rr_reward / rr_risk)
+
+    if direction == "LONG":
+        sl = price * (1 - stop_pct / 100)
+        tp = price * (1 + take_pct / 100)
+        header = f"🎯 ЛОНГ {symbol} с R:R {rr_risk}:{rr_reward}"
+    else:
+        sl = price * (1 + stop_pct / 100)
+        tp = price * (1 - take_pct / 100)
+        header = f"🎯 ШОРТ {symbol} с R:R {rr_risk}:{rr_reward}"
+
+    ema50_1h = _ema(closes_1h, 50)[-1]
+    ema200_1h = _ema(closes_1h, 200)[-1] if len(closes_1h) >= 200 else _ema(closes_1h, 50)[-1]
+    rsi_1h = _rsi(closes_1h, 14)
+    trend = "бычий" if ema50_1h > ema200_1h else "медвежий"
+
+    return (
+        f"{header}\n\n"
+        f"💰 Вход: {_fmt_price(price)} USDT\n"
+        f"⏱ ТФ: 4h (свинг-трейдинг)\n"
+        f"🎯 Стоп-лосс: {stop_pct:.1f}% → {_fmt_price(sl)}\n"
+        f"🎯 Тейк-профит: {take_pct:.1f}% → {_fmt_price(tp)}\n"
+        f"📊 Риск-ревард: {rr_risk}:{rr_reward}\n\n"
+        "📈 Технические факторы:\n"
+        f"• RSI 1h: {rsi_1h:.2f}\n"
+        f"• Тренд 1h: EMA50 {'>' if ema50_1h > ema200_1h else '<'} EMA200 ({trend})\n"
+        "• Контроль: вход только после подтверждения импульса по свечам и объёму"
+    )
