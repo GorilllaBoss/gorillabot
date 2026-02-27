@@ -240,6 +240,34 @@ def _fmt_price(v: float) -> str:
         return f"{v:,.5f}"
     return f"{v:,.6f}"
 
+def _market_structure_block(pretty: str, price: float, bb_u: float, bb_l: float, ema50_4h: float, rsi_15: float, vol_ratio: float, macd: float, signal: float, companion: dict | None = None) -> str:
+    pair_name = pretty.replace("/USDT", "")
+    trend_state = "сжатая пружина" if abs(price - ema50_4h) / max(ema50_4h, 1e-8) < 0.02 else "направленное движение"
+    pressure = "умеренно медвежье" if (price < ema50_4h and macd < signal) else "умеренно бычье" if (price > ema50_4h and macd > signal) else "нейтральное"
+    volume_note = "объём подтверждает импульс" if vol_ratio > 1.15 else "объём ниже среднего — повышен риск ложных пробоев"
+
+    companion_text = ""
+    if companion:
+        c_name = companion.get("name", "ALT")
+        c_change = companion.get("change", 0.0)
+        c_note = "подтверждает силу" if c_change >= 0 else "слабее и не подтверждает импульс"
+        companion_text = f"\n{c_name} как индикатор: {c_change:+.2f}% за 24ч — {c_note}."
+
+    return (
+        "\n\n🧠 Структура рынка:\n"
+        f"Рынок по {pair_name} сейчас в режиме «{trend_state}», фон: {pressure}. "
+        f"{volume_note}."
+        f"{companion_text}\n\n"
+        "Сценарии (вероятностно):\n"
+        f"1) Базовый: ретест {_fmt_price(bb_u)} → отказ → движение к {_fmt_price(bb_l)}.\n"
+        f"2) Squeeze: быстрый прокол выше {_fmt_price(bb_u)} с возвратом в диапазон.\n"
+        f"3) Флэт: удержание между {_fmt_price(bb_l)} и {_fmt_price(bb_u)} до нового объёма.\n\n"
+        "Ключевой триггер:\n"
+        f"• Закрепление выше {_fmt_price(bb_u)} — усиление роста.\n"
+        f"• Потеря {_fmt_price(bb_l)} — риск ускорения коррекции."
+    )
+
+
 def analyze_binance_pair(pair: str, api_key: str = "") -> str:
     raw = (pair or "").upper().replace(" ", "")
     symbol = raw.replace("/", "")
@@ -256,6 +284,14 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         closes_4h, _ = _fetch_binance_klines(symbol, "4h", 200, api_key=api_key)
         price = _fetch_binance_price(symbol, api_key=api_key)
         ticker24 = _fetch_binance_24h(symbol, api_key=api_key)
+
+        companion = None
+        if symbol != "ETHUSDT":
+            try:
+                eth24 = _fetch_binance_24h("ETHUSDT", api_key=api_key)
+                companion = {"name": "ETH", "change": float(eth24.get("priceChangePercent", 0.0))}
+            except Exception:
+                companion = None
     except Exception as e:
         return f"⚠️ Ошибка Binance API: {e}"
 
@@ -327,6 +363,7 @@ def analyze_binance_pair(pair: str, api_key: str = "") -> str:
         f"• EMA(50) 4ч: ${_fmt_price(ema50_4h)} (ближайший уровень)\n\n"
         "Рекомендация:\n"
         f"{rec}"
+        + _market_structure_block(pretty, price, bb_u, bb_l, ema50_4h, rsi_15, vol_ratio, macd, signal, companion)
     )
 
 
