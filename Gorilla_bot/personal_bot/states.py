@@ -11,21 +11,45 @@ class AssistantState(StatesGroup):
 
 class CryptoState(StatesGroup):
     waiting_coin = State()
+    waiting_followup = State()
 
 
 class PsychologyState(StatesGroup):
     waiting_mode = State()
     waiting_question = State()
-    waiting_contact = State()
 
 
 class EsotericState(StatesGroup):
     waiting_system = State()
-    waiting_question = State()
+    waiting_payload = State()
 
 
 class NavigatorState(StatesGroup):
-    waiting_message = State()
+    onboarding = State()
+    coach = State()
+    update = State()
+    reminders = State()
+    edit_goals = State()
+    edit_today = State()
+
+
+class ProjectState(StatesGroup):
+    intro = State()
+    channel_ready = State()
+    username = State()
+    access_check = State()
+    theme_pick = State()
+    custom_theme = State()
+    examples = State()
+    frequency = State()
+    posting_time = State()
+    sources = State()
+    format_style = State()
+    summary = State()
+    edit_theme = State()
+    edit_examples = State()
+    edit_sources = State()
+    edit_style = State()
 
 
 class ChannelSetupState(StatesGroup):

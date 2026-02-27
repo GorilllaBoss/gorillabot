@@ -1,6 +1,6 @@
 # Personal Telegram Bot (MVP)
 
-Файл `personal_assistant_bot.py` — это заготовка под личного Telegram-бота с разделением доступа:
+Файл `bot.py` — это заготовка под личного Telegram-бота с разделением доступа:
 
 - `/ask` — публичный AI-ассистент (доступен всем)
 - приватные функции по коду (`/access`):
@@ -22,7 +22,7 @@ cp .env.example .env
 set -a
 source .env
 set +a
-python personal_assistant_bot.py
+python bot.py
 ```
 
 ### Windows PowerShell
@@ -39,7 +39,7 @@ Get-Content .env | ForEach-Object {
   $name, $value = $_ -split '=', 2
   [Environment]::SetEnvironmentVariable($name.Trim(), $value.Trim().Trim('"'), 'Process')
 }
-python personal_assistant_bot.py
+python bot.py
 ```
 
 
@@ -55,6 +55,8 @@ BOT_TOKEN=1234567890:YOUR_TELEGRAM_BOT_TOKEN
 OPENROUTER_API_KEY=sk-or-v1-your-openrouter-api-key
 BOT_ACCESS_CODE=MyStrongPrivateCode2026
 OPENROUTER_MODEL=openai/gpt-4o-mini
+BINANCE_API_KEY=optional-binance-api-key
+BINANCE_API_SECRET=optional-binance-api-secret
 ```
 
 
@@ -67,7 +69,7 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 1. В файле `.env` строка должна быть ровно в таком формате:
    `BOT_TOKEN=123456789:AA...`
 2. Не оставляй текст-заглушку `YOUR_TELEGRAM_BOT_TOKEN`.
-3. Убедись, что `.env` лежит либо рядом со скриптом `personal_assistant_bot.py`, либо в текущей папке запуска.
+3. Убедись, что `.env` лежит либо рядом со скриптом `bot.py`, либо в текущей папке запуска.
 4. Возьми новый токен у `@BotFather`, если сомневаешься в текущем.
 
 ## Если видишь ошибку `401 User not found` (OpenRouter)
@@ -123,7 +125,7 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
 
 Да, так удобнее редактировать 👌 Теперь код разделён по модулям:
 
-- `personal_assistant_bot.py` — точка входа, роутинг хендлеров.
+- `bot.py` — точка входа, роутинг хендлеров.
 - `personal_bot/config.py` — `.env`, конфиг и проверка токена.
 - `personal_bot/storage.py` — работа с JSON-хранилищем пользователей.
 - `personal_bot/services.py` — интеграции (OpenRouter/CoinGecko).
@@ -192,3 +194,20 @@ OPENROUTER_MODEL=openai/gpt-4o-mini
   - daily/weekly/monthly фокус.
 
 Все ответы идут с динамическим рандомным ожиданием и аккуратным оформлением.
+
+
+## Обновления SaaS и Navigator
+
+- Меню до доступа упрощено: `🤖 GorillaAI` и `🔐 Премиум услуги`.
+- `🧠 Психология` заменено на `🧠 Помощь ИИ агент` + `Психолог онлайн` (`@aggressive_chik`).
+- `🧭 Тебе точно сюда` теперь проверяет профиль и не запускает onboarding повторно, если анализ уже есть.
+- Добавлен Dashboard Navigator: совет, цели, профиль, план сегодня, напоминания, обновление анализа.
+- Добавлен SaaS-мастер `🚀 Создать проект` (8 шагов) и `📁 Мои проекты`.
+- Эзотерика переведена в отдельные кнопки по каждому из 24 направлений с глубоким входным форматом.
+- Добавлены `docs/schema.sql` и `docs/saas_architecture.md` для PostgreSQL-архитектуры.
+
+
+### Binance API в этом проекте
+
+- Для текущего крипто-анализа ключи **не обязательны** (используются публичные Binance endpoints).
+- Если хочешь, можно добавить `BINANCE_API_KEY` и `BINANCE_API_SECRET` в `.env` — бот уже читает эти переменные.
